@@ -1,6 +1,6 @@
 const { getActiveWallet } = require('../wallet/manager');
 const { checkBalance } = require('../actions/faucet');
-const { createMission } = require('../actions/launch');
+const { createMission, resolveLaunch } = require('../actions/launch');
 const { buy, sell } = require('../actions/fuel');
 const { stake, unstake, claim, pendingRewards } = require('../actions/stake');
 const { printAction } = require('./display');
@@ -17,7 +17,11 @@ async function executeAction(signer, action, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       if (normalized.balance) return await checkBalance(signer);
-      if (normalized.launch) return await createMission(signer, normalized.launch);
+      if (normalized.launch) {
+        const resolved = resolveLaunch(normalized.launch);
+        normalized.launch = resolved;
+        return await createMission(signer, resolved);
+      }
       if (normalized.buy) return await buy(signer, normalized.buy.mission, normalized.buy.amount);
       if (normalized.sell) return await sell(signer, normalized.sell.mission, normalized.sell.amount);
       if (normalized.stake) return await stake(signer, normalized.stake.amount);

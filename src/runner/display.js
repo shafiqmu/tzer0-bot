@@ -71,7 +71,13 @@ function printAction(index, total, action, result, success, error) {
   
   if (actionData && typeof actionData === 'object' && Object.keys(actionData).length > 0) {
     for (const [key, value] of Object.entries(actionData)) {
-      console.log(`   ${key}: ${value}`);
+      if (actionLabel === 'launch' && key === 'name' && result && result.resolvedName) {
+        console.log(`   ${key}: ${result.resolvedName}`);
+      } else if (actionLabel === 'launch' && key === 'ticker' && result && result.resolvedTicker) {
+        console.log(`   ${key}: ${result.resolvedTicker}`);
+      } else {
+        console.log(`   ${key}: ${value}`);
+      }
     }
   }
   

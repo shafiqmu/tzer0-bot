@@ -1,6 +1,6 @@
 name: launch
 actions:
   - launch:
-      name: "Hermes Test"
-      ticker: "HTST"
+      name: "random"
+      ticker: "random"
       initialBuyEth: "0"
