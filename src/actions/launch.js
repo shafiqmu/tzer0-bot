@@ -37,7 +37,7 @@ function resolveLaunch(input) {
     ? PROJECT_STYLES[Math.floor(Math.random() * PROJECT_STYLES.length)]()
     : input.name;
   const ticker = !input.ticker || input.ticker.toLowerCase() === 'random'
-    ? randomString(3)
+    ? name.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase()
     : input.ticker;
   return { ...input, name, ticker };
 }
