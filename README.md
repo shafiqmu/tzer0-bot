@@ -32,7 +32,7 @@ node src/index.js dryrun tasks/contoh.yaml  # simpan tanpa tx
 
 `run` otomatis detek mode:
 - 1 wallet → single mode
-- banyak wallet (`PRIVATE_KEYS_JSON`) → multi mode, tampil `Wallet X/Y`
+- banyak wallet (`PRIVATE_KEY_1`, `PRIVATE_KEY_2`, ...) → multi mode, tampil `Wallet X/Y`
 
 ## Launch Mission
 
@@ -48,8 +48,8 @@ actions:
 ```
 
 `name` dan `ticker` bisa diisi `"random"` atau dikosongkan untuk auto-generate:
-- `name` → `Mission-XXXX`
-- `ticker` → `TST-XXXX`
+- `name` → kombinasi human-like seperti `NexusAI`, `Alpha Capital`, `Daedalus`
+- `ticker` → 3 huruf acak
 
 Jalankan:
 ```bash
@@ -80,11 +80,11 @@ actions:
 |-----|--------|
 | `RPC_URL` | Base Sepolia RPC |
 | `PRIVATE_KEY` | single wallet |
-| `PRIVATE_KEYS_JSON` | multi wallet array JSON |
-| `TEST_WALLET_FILE` | path ke test wallet JSON |
+| `PRIVATE_KEY_1`, `PRIVATE_KEY_2`, ... | multi wallet, baris per wallet |
+| `TEST_WALLET_FILE` | opsional, path ke test wallet JSON |
 | `CHAIN_ID` | default `84532` |
 
-Precedence wallet: `PRIVATE_KEY` → `PRIVATE_KEYS_JSON` → `TEST_WALLET_FILE`
+Precedence wallet: `PRIVATE_KEY` → `PRIVATE_KEY_*` → `TEST_WALLET_FILE`
 
 ## Output
 
