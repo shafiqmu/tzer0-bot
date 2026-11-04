@@ -42,10 +42,14 @@ Buat file YAML misal `tasks/launch.yaml`:
 name: launch
 actions:
   - launch:
-      name: "Hermes Test"
-      ticker: "HTST"
+      name: "random"
+      ticker: "random"
       initialBuyEth: "0"
 ```
+
+`name` dan `ticker` bisa diisi `"random"` atau dikosongkan untuk auto-generate:
+- `name` → `Mission-XXXX`
+- `ticker` → `TST-XXXX`
 
 Jalankan:
 ```bash
