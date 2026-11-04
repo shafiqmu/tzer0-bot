@@ -13,12 +13,10 @@ function getActiveWallet(cfg, index = 0) {
   let keys = [];
   if (cfg.privateKey) {
     keys = [cfg.privateKey];
-  } else if (cfg.privateKeysJson) {
-    keys = Object.values(JSON.parse(cfg.privateKeysJson));
+  } else if (cfg.privateKeys && Array.isArray(cfg.privateKeys) && cfg.privateKeys.length) {
+    keys = cfg.privateKeys;
   } else if (cfg.testWalletFile) {
     keys = [loadTestWalletKey(cfg.testWalletFile)];
-  } else if (Array.isArray(cfg.privateKeys)) {
-    keys = cfg.privateKeys;
   }
 
   if (!keys.length) {
@@ -34,12 +32,10 @@ function getAllSigners(cfg) {
   let keys = [];
   if (cfg.privateKey) {
     keys = [cfg.privateKey];
-  } else if (cfg.privateKeysJson) {
-    keys = Object.values(JSON.parse(cfg.privateKeysJson));
+  } else if (cfg.privateKeys && Array.isArray(cfg.privateKeys) && cfg.privateKeys.length) {
+    keys = cfg.privateKeys;
   } else if (cfg.testWalletFile) {
     keys = [loadTestWalletKey(cfg.testWalletFile)];
-  } else if (Array.isArray(cfg.privateKeys)) {
-    keys = cfg.privateKeys;
   }
 
   if (!keys.length) {

@@ -8,11 +8,19 @@ async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0];
 
-  if (cmd === 'run' && args[1]) {
+  if ((cmd === 'run' || cmd === 'multi') && args[1]) {
     const cfg = loadConfig();
     const task = loadTask(args[1]);
-    const results = await executeTask(cfg, task);
-    printSummary(results);
+    const { getAllSigners } = require('./wallet/manager');
+    const signers = getAllSigners(cfg);
+
+    if (signers.length > 1) {
+      const results = await runForAllWallets(cfg, task);
+      printSummary(results);
+    } else {
+      const results = await executeTask(cfg, task);
+      printSummary(results);
+    }
   } else if (cmd === 'dryrun' && args[1]) {
     const cfg = loadConfig();
     const task = loadTask(args[1]);
@@ -28,13 +36,11 @@ async function main() {
       initialBuyEth: args[3] || '0',
     });
     console.log('Launched:', tx.missionAddress);
-  } else if (cmd === 'multi' && args[1]) {
-    const cfg = loadConfig();
-    const task = loadTask(args[1]);
-    const results = await runForAllWallets(cfg, task);
-    printSummary(results);
   } else {
-    console.log('Usage: node src/index.js <run|dryrun|stake|multi> [args]');
+    console.log('Usage: node src/index.js <run|dryrun|stake> [task.yaml]');
+    console.log('  run      - auto single/multi based on env');
+    console.log('  dryrun   - simulate without sending');
+    console.log('  stake    - launch a mission directly');
     process.exit(1);
   }
 }
