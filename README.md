@@ -26,11 +26,14 @@ termux-wake-lock
 ## Commands
 
 ```bash
-node src/index.js run tasks/e2e-t0.yaml    # single wallet
-node src/index.js multi tasks/e2e-t0.yaml  # multi wallet
-node src/index.js dryrun tasks/e2e-t0.yaml # simpan tanpa tx
-node src/index.js stake <name> [ticker]    # launch mission
+node src/index.js run tasks/contoh.yaml     # auto single/multi
+node src/index.js dryrun tasks/contoh.yaml  # simpan tanpa tx
+node src/index.js stake <name> [ticker]     # launch mission
 ```
+
+`run` otomatis detek mode:
+- 1 wallet → single mode
+- banyak wallet (`PRIVATE_KEYS_JSON`) → multi mode, tampil `Wallet X/Y`
 
 ## Task YAML
 
@@ -39,7 +42,7 @@ name: e2e-test
 actions:
   - balance: check
   - buy:
-      mission: "0x15522727F10Ea666Ebb4fD4c23b394580F10FED4"
+      mission: "0x15522727F10Ea666Ebb4fD4c23B394580F10FED4"
       amount: "0.0001"
   - rewards: check
   - stake:
@@ -52,40 +55,47 @@ actions:
 
 ## Config
 
-- `RPC_URL` — Base Sepolia RPC
-- `PRIVATE_KEY` — single wallet
-- `PRIVATE_KEYS_JSON` — multi wallet array
-- `TEST_WALLET_FILE` — path ke test wallet JSON
-- `CHAIN_ID` — default 84532
+| Env | Fungsi |
+|-----|--------|
+| `RPC_URL` | Base Sepolia RPC |
+| `PRIVATE_KEY` | single wallet |
+| `PRIVATE_KEYS_JSON` | multi wallet array JSON |
+| `TEST_WALLET_FILE` | path ke test wallet JSON |
+| `CHAIN_ID` | default `84532` |
+
+Precedence wallet: `PRIVATE_KEY` → `PRIVATE_KEYS_JSON` → `TEST_WALLET_FILE`
 
 ## Output
 
 ```
-🚀 Starting task: t0-e2e-test
-👛 Wallet: 0xf368...
-
-[1/8] FAUCET
-   💎 0.010042 ETH
-
-[2/8] BUY
-   mission: 0x1552...
-   amount: 0.001
-   ✅ tx: 0x65ca... | block: 54314890 | gas: 214728
-
-[3/8] REWARDS
-   💰 pending: 0 wei
-
-...
-
 ════════════════════════════════════════════════════════════
-📊 Summary
-════════════════════════════════════════════════════════════
-Total actions: 8
-Passed: 8
-Failed: 0
+ WALLET 1/2
+   0x8fd3...7A03
 ════════════════════════════════════════════════════════════
 
-Log saved to: logs/t0-e2e-test-1793787403817.json
+🚀 Starting task: testnet-smoke
+👛 Wallet: 0x8fd379246834eac74B8419FfdA202CF8051F7A03
+
+[1/3] BALANCE
+   ✅ Success
+
+[2/3] BUY
+   mission: 0x86E0...19979
+   amount: 0.00001
+   ❌ Error: insufficient funds for gas * price + value
+
+[3/3] SELL
+   mission: 0x86E0...19979
+   amount: 106215
+   ❌ Error: insufficient funds for gas * price + value
+
+════════════════════════════════════════════════════════════
+📊 FINAL SUMMARY ❌
+════════════════════════════════════════════════════════════
+   Total actions : 3
+   Passed       : 1
+   Failed       : 2
+════════════════════════════════════════════════════════════
 ```
 
 ## Live Tested
@@ -95,4 +105,5 @@ Log saved to: logs/t0-e2e-test-1793787403817.json
 - Stake/unstake/claim
 - Launch mission
 - Multi-wallet runner
-- Retry + logging
+- Retry logic
+- Console-only output, no file logging
