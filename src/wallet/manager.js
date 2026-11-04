@@ -20,7 +20,7 @@ function getActiveWallet(cfg, index = 0) {
   }
 
   if (!keys.length) {
-    throw new Error('No private key configured. Set PRIVATE_KEY, PRIVATE_KEYS_JSON, or TEST_WALLET_FILE.');
+    throw new Error('No private key configured. Paste 0x... private keys line-by-line in .env, or set PRIVATE_KEY / TEST_WALLET_FILE.');
   }
 
   const key = keys[index % keys.length];
@@ -39,7 +39,7 @@ function getAllSigners(cfg) {
   }
 
   if (!keys.length) {
-    throw new Error('No private keys configured.');
+    throw new Error('No private keys configured. Paste 0x... private keys line-by-line in .env.');
   }
 
   const provider = new ethers.JsonRpcProvider(cfg.rpcUrl);

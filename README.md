@@ -13,7 +13,7 @@ termux-setup-storage
 # 4. Run setup:
 bash termux-setup.sh
 
-# 5. Edit .env dengan private key atau test wallet
+# 5. Edit .env — tempel private key langsung (satu per baris)
 nano .env
 
 # 6. Jalankan bot:
@@ -32,7 +32,7 @@ node src/index.js dryrun tasks/contoh.yaml  # simpan tanpa tx
 
 `run` otomatis detek mode:
 - 1 wallet → single mode
-- banyak wallet (`PRIVATE_KEY_1`, `PRIVATE_KEY_2`, ...) → multi mode, tampil `Wallet X/Y`
+- banyak wallet (beberapa baris `0x...` di `.env`) → multi mode, tampil `Wallet X/Y`
 
 ## Launch Mission
 
@@ -76,15 +76,25 @@ actions:
 
 ## Config
 
+Contoh `.env`:
+
+```env
+RPC_URL=https://sepolia.base.org
+CHAIN_ID=84532
+
+0x1111...aaaa   # wallet 1
+0x2222...bbbb   # wallet 2  ← tambah baris = tambah wallet
+```
+
 | Env | Fungsi |
 |-----|--------|
 | `RPC_URL` | Base Sepolia RPC |
-| `PRIVATE_KEY` | single wallet |
-| `PRIVATE_KEY_1`, `PRIVATE_KEY_2`, ... | multi wallet, baris per wallet |
-| `TEST_WALLET_FILE` | opsional, path ke test wallet JSON |
+| `0x...` (baris polos) | wallet — satu private key per baris, langsung tempel |
 | `CHAIN_ID` | default `84532` |
 
-Precedence wallet: `PRIVATE_KEY` → `PRIVATE_KEY_*` → `TEST_WALLET_FILE`
+Precedence wallet: `PRIVATE_KEY` → baris `0x...` → `PRIVATE_KEY_*` (lama) → `TEST_WALLET_FILE`
+
+Format lama tetap didukung: `PRIVATE_KEY`, `PRIVATE_KEY_1`, `PRIVATE_KEY_2`, ..., `PRIVATE_KEYS_JSON`, `TEST_WALLET_FILE`.
 
 ## Output
 
