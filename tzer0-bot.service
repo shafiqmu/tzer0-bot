@@ -1,0 +1,14 @@
+[Unit]
+Description=TZer0 Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/camofox-browser/tzer0-bot
+ExecStart=/usr/bin/node src/index.js run tasks/e2e-t0.yaml
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

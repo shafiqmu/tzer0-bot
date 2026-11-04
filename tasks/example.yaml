@@ -1,0 +1,16 @@
+name: testnet-smoke
+actions:
+  - balance: check
+  - buy:
+      mission: "0x86E0ce87ab676975a974bE38549f599e3cA19979"
+      amount: "0.00001"
+  - sell:
+      mission: "0x86E0ce87ab676975a974bE38549f599e3cA19979"
+      amount: "106215"  # ~1% of balance
+  # Staking actions require $T0 tokens (0x15522727F10Ea666Ebb4fD4c23B394580F10FED4)
+  # - stake:
+  #     amount: "1000"  # $T0 amount (18 decimals)
+  # - unstake:
+  #     amount: "1000"
+  # - claim
+  # - rewards: check

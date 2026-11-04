@@ -1,0 +1,7 @@
+name: multi-wallet-test
+actions:
+  - balance: check
+  - buy:
+      mission: "0x15522727F10Ea666Ebb4fD4c23B394580F10FED4"
+      amount: "0.001"
+  - rewards: check

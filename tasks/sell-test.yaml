@@ -1,0 +1,6 @@
+name: testnet-sell
+actions:
+  - balance: check
+  - sell:
+      mission: "0x86E0ce87ab676975a974bE38549f599e3cA19979"
+      amount: "1000"
