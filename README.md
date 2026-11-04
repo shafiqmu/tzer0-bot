@@ -28,12 +28,29 @@ termux-wake-lock
 ```bash
 node src/index.js run tasks/contoh.yaml     # auto single/multi
 node src/index.js dryrun tasks/contoh.yaml  # simpan tanpa tx
-node src/index.js stake <name> [ticker]     # launch mission
 ```
 
 `run` otomatis detek mode:
 - 1 wallet → single mode
 - banyak wallet (`PRIVATE_KEYS_JSON`) → multi mode, tampil `Wallet X/Y`
+
+## Launch Mission
+
+Buat file YAML misal `tasks/launch.yaml`:
+
+```yaml
+name: launch
+actions:
+  - launch:
+      name: "Hermes Test"
+      ticker: "HTST"
+      initialBuyEth: "0"
+```
+
+Jalankan:
+```bash
+node src/index.js run tasks/launch.yaml
+```
 
 ## Task YAML
 

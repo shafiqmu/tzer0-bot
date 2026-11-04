@@ -25,22 +25,10 @@ async function main() {
     const cfg = loadConfig();
     const task = loadTask(args[1]);
     await dryRun(cfg, task);
-  } else if (cmd === 'stake' && args[1]) {
-    const cfg = loadConfig();
-    const { getActiveWallet } = require('./wallet/manager');
-    const { createMission } = require('./actions/launch');
-    const signer = getActiveWallet(cfg);
-    const tx = await createMission(signer, {
-      name: args[1],
-      ticker: args[2] || 'TST',
-      initialBuyEth: args[3] || '0',
-    });
-    console.log('Launched:', tx.missionAddress);
   } else {
-    console.log('Usage: node src/index.js <run|dryrun|stake> [task.yaml]');
-    console.log('  run      - auto single/multi based on env');
-    console.log('  dryrun   - simulate without sending');
-    console.log('  stake    - launch a mission directly');
+    console.log('Usage: node src/index.js <run|dryrun> <task.yaml>');
+    console.log('  run     - auto single/multi based on env');
+    console.log('  dryrun  - simulate without sending');
     process.exit(1);
   }
 }

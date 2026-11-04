@@ -1,0 +1,6 @@
+name: launch
+actions:
+  - launch:
+      name: "Hermes Test"
+      ticker: "HTST"
+      initialBuyEth: "0"
