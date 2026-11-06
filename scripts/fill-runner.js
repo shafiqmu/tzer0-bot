@@ -131,7 +131,7 @@ async function main() {
   for (const k of keys) { try { const a = new ethers.Wallet(k).address.toLowerCase(); if (!byAddr.has(a)) byAddr.set(a, k); } catch (e) {} }
   console.log(`🔑 key .env: ${keys.length} | mode: LIVE | jeda ${minDelay}-${maxDelay} dtk | limit ${limit === Infinity ? '∞' : limit}`);
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://sepolia.base.org');
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com');
   const walletCache = new Map();
   const getSigner = (addr) => {
     const lc = addr.toLowerCase();

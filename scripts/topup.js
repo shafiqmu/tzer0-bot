@@ -47,7 +47,7 @@ async function main() {
   const entries = Object.entries(plan.topup || {}).filter(([, v]) => v > 0);
   const total = entries.reduce((s, [, v]) => s + v, 0);
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://sepolia.base.org');
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com');
   const wallet = new ethers.Wallet(getFunderKey(), provider);
   const bal = await provider.getBalance(wallet.address);
 

@@ -50,7 +50,7 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://sepolia.base.org');
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com');
   let fee;
   try {
     const feeView = new ethers.Contract(ADDRS.launchpad, ['function CREATION_FEE() view returns (uint256)'], provider);
