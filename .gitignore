@@ -6,3 +6,6 @@ test-wallets/
 !*.example
 logs/
 .env.multi
+creators.env
+funder.key
+analysis/
