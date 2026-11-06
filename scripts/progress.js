@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// progress.js — watchdog rantai tzero: self-heal restart + print HANYA kalau ada kejadian.
-// Dipakai cron no_agent: stdout kosong = senyap; ada isi = ping ke chat.
-// Kill-switch: file analysis/STOP ada → tidak akan restart (buat stop sengaja).
+// progress.js v3 — laporan per jam ke chat (cron tzero-chain-watchdog) + self-heal restart.
+// Mencetak laporan SETIAP RUN; senyap hanya kalau STOP flag aktif / sudah selesai & pernah dilaporkan.
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -13,29 +12,37 @@ const P_STATE = path.join(A, 'progress_state.json');
 const readJSON = (p, d) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return d; } };
 const alive = (pat) => { try { execSync(`pgrep -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); return true; } catch { return false; } };
 const mtimeAgeMin = (p) => { try { return (Date.now() - fs.statSync(p).mtimeMs) / 60000; } catch { return Infinity; } };
+const fmtH = (h) => (h >= 48 ? `${(h / 24).toFixed(1)} hari` : `${Math.round(h)} jam`);
 
+// ---- data ----
 const fill = readJSON(path.join(A, 'fill_state.json'), { tickets: {} });
 let done = 0, failed = 0, other = 0;
 for (const t of Object.values(fill.tickets || {})) {
   if (t.status === 'done') done++; else if (t.status === 'failed') failed++; else other++;
 }
+const started = done + failed + other;
+const TOTAL = 4004;
+
+const plan = readJSON(path.join(A, 'topup_plan_v2.json'), {});
+const relays = new Set((readJSON(path.join(A, 'relays.json'), { relays: [] }).relays || []).map((r) => String(r).toLowerCase()));
+let expectedTopups = 0;
+for (const [a, v] of Object.entries(plan.topup || {})) { if (Number(v) > 0 && !relays.has(a.toLowerCase())) expectedTopups++; }
 let sent = 0;
 for (let n = 0; n < 4; n++) sent += Object.keys(readJSON(path.join(A, `distribute_state_${n}.json`), { sent: {} }).sent || {}).length;
 
 const missions = readJSON(path.join(A, 'missions_14.json'), { missions: {} });
 const missionCount = Object.keys(missions.missions || {}).filter((k) => missions.missions[k].address).length;
 
+// ---- proses & self-heal ----
 const chainAlive = alive('finish-all.sh');
 const fillAlive = alive('fill-runner.js');
 const distAlive = alive('distribute.js');
 const launchAlive = alive('launch-creators.js');
-
-const complete = done + failed + other >= 4004 && other === 0;
+const complete = started >= TOTAL && other === 0;
 const stopFlag = fs.existsSync(path.join(A, 'STOP'));
 const recentLog = Math.min(...['fill.log', 'distribute_0.log', 'distribute_1.log', 'distribute_2.log', 'distribute_3.log', 'launch.log'].map((f) => mtimeAgeMin('logs/' + f)));
 const restartAgeMin = mtimeAgeMin(path.join(A, 'chain_restart_ts'));
-
-const st = readJSON(P_STATE, { reported: 0, lastFailed: 0, reportedDone: false });
+const st = readJSON(P_STATE, { lastFailed: 0, reportedDone: false, lastDone: 0, lastSent: 0, lastTs: Date.now() });
 
 let heal = 'ok';
 if (complete) heal = 'done';
@@ -52,22 +59,44 @@ else {
   } catch (e) { heal = 'restart-fail'; }
 }
 
+// ---- pesan ----
+const now = Date.now();
+const dtH = Math.max((now - st.lastTs) / 3.6e6, 1 / 60);
+const rate = (done - st.lastDone) / dtH;
+const rateS = (sent - st.lastSent) / dtH;
+const tag = heal === 'RESTARTED' ? ' 🔁 baru di-restart' : heal === 'restart-fail' ? ' ⚠️ chain MATI, gagal restart!' : heal === 'just-restarted' ? ' 🔁 (baru restart)' : '';
 const out = [];
-if (heal === 'RESTARTED') out.push(`🔁 [tzero] chain mati — di-restart otomatis. fill ${done}/4004, ${failed} failed, topups ${sent}.`);
-if (heal === 'restart-fail') out.push(`⚠️ [tzero] chain mati & GAGAL restart otomatis — perlu cek manual. fill ${done}/4004, ${failed} failed.`);
-if (heal === 'launch-belum-kelar' && done + other + failed === 0) out.push(`⚠️ [tzero] fill belum bisa jalan: mission baru ${missionCount}/14.`);
-if (complete && !st.reportedDone) out.push(`✅ [tzero] SEMUA KELAR: 4004 tiket (${done} done, ${failed} failed) | topups ${sent}.`);
-if (failed > st.lastFailed) out.push(`⚠️ [tzero] tiket gagal nambah: ${st.lastFailed} → ${failed} (done ${done}/4004).`);
 
-const milestone = Math.floor(done / 1000) * 1000;
-if (!out.length && milestone > st.reported && milestone > 0) {
-  out.push(`📊 [tzero] progress: ${done}/4004 tiket done (${failed} failed) — jalan normal.`);
+if (complete) {
+  if (!st.reportedDone) out.push(`✅ [tzero] SELESAI — ${TOTAL} tiket: ${done} sukses, ${failed} gagal · top-up ${sent}/${expectedTopups}. Cek poin: testnet.tzer0.fun/points`);
+} else if (started === 0) {
+  if (sent >= expectedTopups) {
+    out.push(`⏳ [tzero] Top-up kelar (${sent}/${expectedTopups}) — fill mulai bentar lagi${tag}`);
+  } else if (sent === 0) {
+    out.push(`📦 [tzero] Top-up: fase distribusi relay jalan (baru mulai, tercatat tiap 25 kiriman)${tag}`);
+  } else {
+    const parts = [`📦 [tzero] Top-up: ${sent}/${expectedTopups} wallet`];
+    if (rateS > 1) { parts.push(`~${Math.round(rateS)}/jam`); parts.push(`sisa ~${fmtH((expectedTopups - sent) / rateS)}`); }
+    out.push(parts.join(' · ') + ` — distribusi relay${tag}`);
+  }
+} else {
+  const pct = (((done + failed) / TOTAL) * 100).toFixed(1);
+  const etaH = rate > 0.5 ? (TOTAL - started) / rate : null;
+  const parts = [`⛽ [tzero] Fill: ${done}/${TOTAL} (${pct}%)`, `gagal ${failed}`];
+  if (rate > 0.5) { parts.push(`~${Math.round(rate)}/jam`); if (etaH != null) parts.push(`sisa ~${fmtH(etaH)}`); }
+  if (sent < expectedTopups) parts.push(`topup ${sent}/${expectedTopups}`);
+  out.push(parts.join(' · ') + tag);
 }
+if (failed > st.lastFailed) out.push(`⚠️ [tzero] tiket gagal nambah: ${st.lastFailed} → ${failed}`);
+if (heal === 'restart-fail' && !out.length) out.push(`⚠️ [tzero] chain MATI dan gagal restart — perlu cek manual!`);
+if (stopFlag) out.length = 0;
 
 fs.writeFileSync(P_STATE, JSON.stringify({
-  reported: Math.max(st.reported, milestone),
   lastFailed: failed,
   reportedDone: complete ? true : st.reportedDone,
+  lastDone: done,
+  lastSent: sent,
+  lastTs: now,
 }));
 
 if (out.length) console.log(out.join('\n'));
