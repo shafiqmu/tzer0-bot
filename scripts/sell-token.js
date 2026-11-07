@@ -73,14 +73,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log(`saldo: ${ethers.formatEther(bal)} | jual ${pct}% = ${ethers.formatEther(amount)} | wallet ${wallet.address.slice(0, 10)}`);
   if (amount === 0n) { console.log('saldo 0 — gak ada yg dijual'); return; }
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  const factors = [BigInt(Number(shave)), BigInt(Math.max(800, Number(shave) - 10)), BigInt(Math.max(800, Number(shave) - 20)), BigInt(Math.max(800, Number(shave) - 35)), BigInt(Math.max(800, Number(shave) - 55)), BigInt(Math.max(800, Number(shave) - 85))];
+  for (let attempt = 0; attempt < factors.length; attempt++) {
     const r = await pair.getReserves();
     const r0 = r[0], r1 = r[1];
     let out, outSafe;
     if (sellSide === 1) { const wf = amount * 997n; out = (wf * r0) / (r1 * 1000n + wf); }
     else { const wf = amount * 997n; out = (wf * r1) / (r0 * 1000n + wf); }
-    outSafe = (out * shave) / 1000n;
-    console.log(`attempt ${attempt}: reserves ${ethers.formatEther(r0)} / ${ethers.formatEther(r1)} → out ≈ ${ethers.formatEther(outSafe)} ETH`);
+    outSafe = (out * factors[attempt]) / 1000n;
+    console.log(`attempt ${attempt + 1} (f${factors[attempt]}): reserves ${ethers.formatEther(r0)} / ${ethers.formatEther(r1)} → out ≈ ${ethers.formatEther(outSafe)} ETH`);
 
     if (mode === 'dry') { console.log('DRY — berhenti di sini'); return; }
 
