@@ -4,6 +4,8 @@
 // Usage: node scripts/sell-batch.js [--run] [--max N] [--min-delay 3 --max-delay 8]
 // State: analysis/sell_state.json  {done: {key: {amt, tx}}, empty: {key: true}, fail: {key: err}}
 // Guard: file STOP → stop. Ada finish-all/fill-runner/repair-grab jalan → tunggu (poll 60 dtk).
+// PENTING: pola pakai awalan 'bash|node scripts/...' lengkap — jangan pola pendek ('fill-runner.js'),
+// nanti ke-match shell lain yg cuma NYEBUT nama itu (false positive, lane nunggu hantu).
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -32,12 +34,12 @@ function busy(names) {
   return null;
 }
 async function waitQuiet() {
-  let b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']); let w = 0;
+  let b = busy(['bash scripts/finish-all\\.sh', 'node scripts/fill-runner\\.js', 'node scripts/repair-grab\\.js']); let w = 0;
   while (b && w < 10800) {
     if (w === 0) console.log('⏳ nunggu mesin lain selesai (' + b + ')...');
     await sleep(60000); w += 60;
     if (fs.existsSync(path.join(A, 'STOP'))) return false;
-    b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']);
+    b = busy(['bash scripts/finish-all\\.sh', 'node scripts/fill-runner\\.js', 'node scripts/repair-grab\\.js']);
   }
   return true;
 }
@@ -68,16 +70,16 @@ async function waitQuiet() {
     if (state.done[key] || state.empty[key]) continue;
     // tunggu mesin lain selesai biar nonce gak tabrakan (dry: skip nunggu)
     if (MODE === 'run') {
-      let b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']);
+      let b = busy(['bash scripts/finish-all\\.sh', 'node scripts/fill-runner\\.js', 'node scripts/repair-grab\\.js']);
       let waited = 0;
       while (b && waited < 10800) {
         if (waited === 0) console.log(`⏳ nunggu mesin lain selesai (${b})...`);
         await sleep(60000); waited += 60;
         if (fs.existsSync(path.join(A, 'STOP'))) return;
-        b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']);
+        b = busy(['bash scripts/finish-all\\.sh', 'node scripts/fill-runner\\.js', 'node scripts/repair-grab\\.js']);
       }
     } else {
-      const b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']);
+      const b = busy(['bash scripts/finish-all\\.sh', 'node scripts/fill-runner\\.js', 'node scripts/repair-grab\\.js']);
       if (b) console.log('(dry) mesin lain jalan:', b);
     }
     if (MODE === 'dry') { console.log('dry target:', t.wallet.slice(0, 10), '×', String(t.mission).slice(0, 10)); continue; }
