@@ -86,26 +86,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log(`transfer rencana: ${trans.length} tx | total ${ethers.formatEther(totalMoved)} ETH`);
   if (!RUN) { console.log('DRY — berhenti.'); for (const t of trans.slice(0, 8)) console.log('  ', t.from.slice(0, 10), '→', t.to.slice(0, 10), ethers.formatEther(t.amount)); return; }
 
-  // 4) eksekusi paralel (tiap donor 1 tx → no nonce clash)
+  // 4) eksekusi — dikelompokkan PER DONOR: satu donor jalan berurutan (nonce gak tabrakan), donor beda paralel
   let ok = 0, fail = 0;
-  const queue = [...trans];
+  const failed = [];
+  const byFrom = new Map();
+  for (const t of trans) { if (!byFrom.has(t.from)) byFrom.set(t.from, []); byFrom.get(t.from).push(t); }
+  const donorQ = [...byFrom.entries()];
+  console.log(`donor dgn kiriman: ${donorQ.length} wallet`);
   async function worker() {
-    while (queue.length) {
-      const t = queue.shift();
-      try {
-        const w = new ethers.Wallet(byAddr.get(t.from), provider);
-        const tx = await w.sendTransaction({ to: t.to, value: t.amount, gasLimit: 21000n });
-        await tx.wait();
-        ok++;
-        if (ok % 10 === 0) console.log(`  ✓ ${ok}/${trans.length}`);
-      } catch (e) {
-        fail++;
-        console.log('  ✗', t.from.slice(0, 10), String(e.shortMessage || e.message).slice(0, 80));
+    while (donorQ.length) {
+      const [from, list] = donorQ.shift();
+      const w = new ethers.Wallet(byAddr.get(from), provider);
+      for (const t of list) {
+        let sent = false;
+        for (let tr = 1; tr <= 2 && !sent; tr++) {
+          try {
+            const tx = await w.sendTransaction({ to: t.to, value: t.amount, gasLimit: 21000n });
+            await tx.wait();
+            ok++; sent = true;
+            if (ok % 10 === 0) console.log(`  ✓ ${ok}/${trans.length}`);
+          } catch (e) {
+            const msg = String(e.shortMessage || e.message).slice(0, 80);
+            if (tr === 2) { fail++; failed.push({ from, to: t.to, amount: ethers.formatEther(t.amount), err: msg }); console.log('  ✗', from.slice(0, 10), msg); }
+            else await sleep(2500);
+          }
+        }
+        await sleep(100);
       }
-      await sleep(120);
+      await sleep(150);
     }
   }
   await Promise.all(Array.from({ length: CONC }, () => worker()));
   console.log(`SELESAI: ${ok} ok | ${fail} gagal | pindah ≈ ${ethers.formatEther(totalMoved)} ETH`);
-  fs.writeFileSync(path.join(ROOT, 'analysis', 'consolidate_last.json'), JSON.stringify({ ts: Date.now(), ok, fail, totalMoved: ethers.formatEther(totalMoved) }, null, 1));
+  fs.writeFileSync(path.join(ROOT, 'analysis', 'consolidate_last.json'), JSON.stringify({ ts: Date.now(), ok, fail, totalMoved: ethers.formatEther(totalMoved), failed: failed.slice(0, 60) }, null, 1));
 })().catch((e) => { console.error('FATAL', e.message); process.exit(1); });

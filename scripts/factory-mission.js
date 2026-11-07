@@ -120,7 +120,7 @@ function loadBareKeys(file) {
   }
 
   if (st.step === 'late') {
-    const lateList = backers.slice(N_EARLY);
+    const lateList = backers.filter((b) => !st.buys[b]); // semua yg belum beli (termasuk seed yg gagal)
     for (let i = 0; i < lateList.length; i++) {
       if (Number(await prog.progressBps(st.mission)) >= 10000) { log('sudah LIFT sebelum semua late masuk'); break; }
       const b = lateList[i];

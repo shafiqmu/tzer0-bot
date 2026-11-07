@@ -168,8 +168,10 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
         process.stdout.write(fOut);
         const shorts = [...fOut.matchAll(/kurang ([\d.]+) ETH/g)].map((x) => Number(x[1]));
         const shortTotal = shorts.reduce((a, b) => a + b, 0);
-        if (shortTotal <= 0.005) funded = true;
-        else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH — tunggu 75s (duit dari jualan balik)... [${tr}/10]`); await sleep(75000); }
+        const gm = /SELESAI: (\d+) ok \| (\d+) gagal/.exec(fOut);
+        const gFail = gm ? Number(gm[2]) : 0;
+        if (shortTotal <= 0.004 && gFail === 0) funded = true;
+        else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH / ${gFail} tx gagal — tunggu 75s (duit dari jualan balik)... [${tr}/10]`); await sleep(75000); }
       }
       if (!funded) say(`⚠️ funding #${mN} pas-pasan — lanjut (spare & refund jaga).`);
       await sleep(4000);
