@@ -2,10 +2,10 @@
 /**
  * fill-runner.js — isi 14 mission pakai 4.004 tiket dari 1.000 wallet.
  *
- * Cara pakai (root repo, Termux):
+ * Cara pakai (root repo):
  *   node scripts/fill-runner.js --dry               # ringkasan rencana (tanpa tx)
  *   node scripts/fill-runner.js --run --limit 10    # TES dulu: 10 tx
- *   node scripts/fill-runner.js --run               # FULL (jeda 20-50 dtk ≈ 30-40 jam)
+ *   node scripts/fill-runner.js --run               # FULL
  *   node scripts/fill-runner.js --status            # progress tiket + progress mission (API)
  *   node scripts/fill-runner.js --run --retry-failed  # ulangi yang gagal
  *   Opsi lain: --min-delay 15 --max-delay 60 --mission m3 --notify
@@ -15,6 +15,8 @@
  *   - Tiket besar (0.0012) per mission dikirim PALING AKHIR setelah semua small-nya beres
  *   - Resumable: mati kapan aja, jalanin lagi = lanjut (state: analysis/fill_state.json)
  *   - Retry otomatis 3x per tiket; yang tetap gagal masuk daftar failed (bisa --retry-failed)
+ *   - AUTO-SKIP: kalau buy mission balas GRADUATED (mission lift duluan), sisa tiketnya
+ *     otomatis ditandai skip (cek via staticCall, cache 10 menit/mission)
  */
 'use strict';
 const fs = require('fs');
@@ -44,7 +46,7 @@ function loadBareKeys(file) {
 function loadState() { return fs.existsSync(STATE_PATH) ? JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')) : { tickets: {}, startedAt: Date.now() }; }
 function saveState(state) { fs.writeFileSync(STATE_PATH, JSON.stringify(state)); }
 function log(line) { try { fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${line}\n`); } catch (e) {} }
-function notify(msg) { try { require('child_process').execSync(`termux-notification --title "TZERO FILL" --content ${JSON.stringify(msg)}`, { stdio: 'ignore' }); } catch (e) {} }
+function notify(msg) { try { require('child_process').execSync(`termux-notification --title \"TZERO FILL\" --content ${JSON.stringify(msg)}`, { stdio: 'ignore' }); } catch (e) {} }
 
 const ticketDone = (state, t) => state.tickets[t.id] && state.tickets[t.id].status === 'done';
 const ticketDead = (state, t) => state.tickets[t.id] && state.tickets[t.id].status === 'failed';
@@ -143,6 +145,25 @@ async function main() {
     return walletCache.get(lc);
   };
 
+  // --- auto-skip utk mission yang sudah GRADUATED (cek staticCall, cache 10 menit) ---
+  const LPB = new ethers.Contract('0xbce48917C41BB45Ad15f859E4Bf0e4EEa74bAd5c', ['function buy(address mission, uint256 minTokens) payable'], provider);
+  const gradCache = {};
+  async function isGrad(k) {
+    const g = gradCache[k];
+    if (g && Date.now() - g.ts < 600000) return g.val;
+    let val = false;
+    try { await LPB.buy.staticCall(addrOf[k], 0n, { value: ethers.parseEther('0.001') }); }
+    catch (e) { val = /GRADUATED/.test(String(e.shortMessage || e.message)); }
+    gradCache[k] = { ts: Date.now(), val };
+    return val;
+  }
+  function markSkip(t) {
+    state.tickets[t.id] = { status: 'failed', attempts: 3, error: 'auto-skip: GRADUATED', wallet: t.wallet, ts: Date.now() };
+    saveState(state);
+    log(`SKIP ${t.id} graduated`);
+    console.log(`⏭️  ${t.id} skip (graduated)`);
+  }
+
   async function execTicket(t) {
     try {
       const signer = getSigner(t.wallet);
@@ -174,6 +195,7 @@ async function main() {
       while (q.smalls.length) {
         const t = q.smalls[0];
         if (ticketDone(state, t) || ticketDead(state, t)) { q.smalls.shift(); continue; }
+        if (await isGrad(k)) { markSkip(t); q.smalls.shift(); continue; }
         if (sent >= limit) break mainLoop;
         const ok = await execTicket(t);
         sent++;
@@ -183,6 +205,7 @@ async function main() {
         break;
       }
       if (q.smalls.length === 0 && q.big && !ticketDone(state, q.big) && !ticketDead(state, q.big)) {
+        if (await isGrad(k)) { markSkip(q.big); q.big = null; continue; }
         if (sent >= limit) break mainLoop;
         const ok = await execTicket(q.big);
         sent++;

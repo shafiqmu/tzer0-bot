@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// progress.js v3 — laporan per jam ke chat (cron tzero-chain-watchdog) + self-heal restart.
+// progress.js v4 — laporan per jam ke chat (cron tzero-chain-watchdog) + self-heal restart.
 // Mencetak laporan SETIAP RUN; senyap hanya kalau STOP flag aktif / sudah selesai & pernah dilaporkan.
+// v4: pisahkan "skip-graduated" (bukan error) dari gagal beneran di laporan & alarm.
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -16,9 +17,11 @@ const fmtH = (h) => (h >= 48 ? `${(h / 24).toFixed(1)} hari` : `${Math.round(h)}
 
 // ---- data ----
 const fill = readJSON(path.join(A, 'fill_state.json'), { tickets: {} });
-let done = 0, failed = 0, other = 0;
+let done = 0, failed = 0, other = 0, skipFailed = 0;
 for (const t of Object.values(fill.tickets || {})) {
-  if (t.status === 'done') done++; else if (t.status === 'failed') failed++; else other++;
+  if (t.status === 'done') done++;
+  else if (t.status === 'failed') { failed++; if (/SKIP|GRADUATED/i.test(t.error || '')) skipFailed++; }
+  else other++;
 }
 const started = done + failed + other;
 const TOTAL = 4004;
@@ -68,7 +71,7 @@ const tag = heal === 'RESTARTED' ? ' 🔁 baru di-restart' : heal === 'restart-f
 const out = [];
 
 if (complete) {
-  if (!st.reportedDone) out.push(`✅ [tzero] SELESAI — ${TOTAL} tiket: ${done} sukses, ${failed} gagal · top-up ${sent}/${expectedTopups}. Cek poin: testnet.tzer0.fun/points`);
+  if (!st.reportedDone) out.push(`✅ [tzero] SELESAI — ${TOTAL} tiket: ${done} sukses, ${failed} gagal${skipFailed ? ` (${skipFailed} skip-graduated)` : ''} · top-up ${sent}/${expectedTopups}.`);
 } else if (started === 0) {
   if (sent >= expectedTopups) {
     out.push(`⏳ [tzero] Top-up kelar (${sent}/${expectedTopups}) — fill mulai bentar lagi${tag}`);
@@ -82,17 +85,20 @@ if (complete) {
 } else {
   const pct = (((done + failed) / TOTAL) * 100).toFixed(1);
   const etaH = rate > 0.5 ? (TOTAL - started) / rate : null;
-  const parts = [`⛽ [tzero] Fill: ${done}/${TOTAL} (${pct}%)`, `gagal ${failed}`];
+  const parts = [`⛽ [tzero] Fill: ${done}/${TOTAL} (${pct}%)`, `gagal ${failed}${skipFailed ? ` (${skipFailed} skip-graduated)` : ''}`];
   if (rate > 0.5) { parts.push(`~${Math.round(rate)}/jam`); if (etaH != null) parts.push(`sisa ~${fmtH(etaH)}`); }
   if (sent < expectedTopups) parts.push(`topup ${sent}/${expectedTopups}`);
   out.push(parts.join(' · ') + tag);
 }
-if (failed > st.lastFailed) out.push(`⚠️ [tzero] tiket gagal nambah: ${st.lastFailed} → ${failed}`);
+const realFailed = failed - skipFailed;
+const prevReal = st.lastRealFailed ?? st.lastFailed ?? 0;
+if (realFailed > prevReal) out.push(`⚠️ [tzero] tiket gagal nambah (selain skip): ${prevReal} → ${realFailed}`);
 if (heal === 'restart-fail' && !out.length) out.push(`⚠️ [tzero] chain MATI dan gagal restart — perlu cek manual!`);
 if (stopFlag) out.length = 0;
 
 fs.writeFileSync(P_STATE, JSON.stringify({
   lastFailed: failed,
+  lastRealFailed: realFailed,
   reportedDone: complete ? true : st.reportedDone,
   lastDone: done,
   lastSent: sent,
