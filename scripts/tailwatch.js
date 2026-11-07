@@ -20,7 +20,7 @@ const A = '/home/ubuntu/tzer0-bot/analysis';
     try { bps = Number(await lp.progressBps(r.address)); } catch (e) {}
     now[r.address] = bps;
     const old = st[r.address];
-    if (old != null && bps != null && bps !== old) {
+    if (old != null && bps != null && Math.abs(bps - old) >= 25) {
       msgs.push(`${r.address.slice(0, 10)}… (ekor ${r.tail}) bps ${old}→${bps}${bps >= 10000 ? ' — LIFT/HILANG!' : ''}`);
     }
   }
