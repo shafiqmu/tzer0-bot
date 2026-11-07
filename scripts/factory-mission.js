@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// factory-mission.js — PILOT pabrik poin: create mission → backer 0.01 (early 6, late 23) → lift → hold → sell → verify.
+// factory-mission.js — siklus pabrik poin (1 mission penuh per run):
+//   create → backer beli (early 6, late sisanya) → tunggu hold 60mnt → lift → tunggu → jual semua → verify poin.
 // Aturan Tzero yg dipatuhi (docs resmi):
 //   - crew +150: backer beli MIN 0.01 di curve, TAHAN 60 mnt, masih pegang saat lift.
 //   - liftoff +500: ≥5 wallet LAIN back 0.01+ (held 60 mnt ke atas).
 //   - jual/transfer token <60 mnt dari beli = poin buy batal → sell baru setelah hold semua kelar.
 //   - creator TIDAK boleh beli mission sendiri (0 poin) → creator gak ikut beli.
-// Usage: node scripts/factory-mission.js --run [--name "Nimbus Foundry"] [--ticker NBFO] [--early 6] [--late 23]
+// Usage: node scripts/factory-mission.js --run [--plan analysis/factory_plan.json] [--state S] [--log L]
+//        [--name "X"] [--ticker XX] [--early 6] [--buyeth 0.01] [--spares 1]
 // State: analysis/factory_state.json (resumable). Log: logs/factory-1.log
 'use strict';
 const fs = require('fs');
@@ -14,21 +16,25 @@ const { spawnSync } = require('child_process');
 const { ethers } = require('ethers');
 
 const ROOT = path.join(__dirname, '..');
-const A = path.join(ROOT, 'analysis');
 const argv = process.argv.slice(2);
 const RUN = argv.includes('--run');
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const resolveP = (p) => (path.isAbsolute(p) ? p : path.join(ROOT, p));
+const PLAN_FILE = resolveP(arg('--plan', 'analysis/factory_plan.json'));
+const STATE_FILE = resolveP(arg('--state', 'analysis/factory_state.json'));
+const LOG_FILE = resolveP(arg('--log', 'logs/factory-1.log'));
 const NAME = arg('--name', 'Nimbus Foundry');
 const TICKER = arg('--ticker', 'NBFO');
 const N_EARLY = Number(arg('--early', 6));
-const N_LATE = Number(arg('--late', 23));
+const BUY_ETH = arg('--buyeth', '0.01'); // nominal backer (string ETH)
+const USE_SPARES = arg('--spares', '1') !== '0';
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const LAUNCHPAD = '0xbce48917C41BB45Ad15f859E4Bf0e4EEa74bAd5c';
-const BUY_ETH = '0.01'; // nominal backer
 const HOLD_MIN = 62; // menit hold minimum sebelum boleh jual
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const log = (...xs) => { const l = `[${new Date().toISOString()}] ${xs.join(' ')}`; console.log(l); try { fs.appendFileSync(path.join(ROOT, 'logs', 'factory-1.log'), l + '\n'); } catch (e) {} };
+const log = (...xs) => { const l = `[${new Date().toISOString()}] ${xs.join(' ')}`; console.log(l); try { fs.appendFileSync(LOG_FILE, l + '\n'); } catch (e) {} };
+const jitterBuy = () => (BigInt(Math.round(Number(BUY_ETH) * 1e6 * (0.96 + Math.random() * 0.08))) * 10n ** 12n).toString();
 
 function loadBareKeys(file) {
   return fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)
@@ -37,11 +43,12 @@ function loadBareKeys(file) {
 }
 
 (async () => {
-  const plan = JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8'));
+  const plan = JSON.parse(fs.readFileSync(PLAN_FILE, 'utf8'));
   const backers = plan.filter((p) => p.role === 'backer').map((p) => p.addr);
   const creator = plan.find((p) => p.role === 'creator').addr;
   const spares = plan.filter((p) => p.role === 'spare').map((p) => p.addr);
-  const stateFile = path.join(A, 'factory_state.json');
+  const N_LATE = Math.max(0, backers.length - N_EARLY);
+  const stateFile = STATE_FILE;
   const st = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { step: 'create', buys: {}, sells: {} };
   const save = () => fs.writeFileSync(stateFile, JSON.stringify(st, null, 1));
 
@@ -50,14 +57,16 @@ function loadBareKeys(file) {
   const byAddr = new Map();
   for (const k of keys) { try { const w = new ethers.Wallet(k); byAddr.set(w.address.toLowerCase(), k); } catch (e) {} }
   const walletOf = (a) => new ethers.Wallet(byAddr.get(a.toLowerCase()), provider);
-  const lp = new ethers.Contract(LAUNCHPAD, [
+  const LP_ABI = [
     'function create(string,string,string) payable returns (address)',
     'function buy(address,uint256) payable',
     'function progressBps(address) view returns (uint256)',
     'function CREATION_FEE() view returns (uint256)',
-  ], provider);
+  ];
+  const lp = new ethers.Contract(LAUNCHPAD, LP_ABI, provider);
+  const prog = new ethers.Contract(LAUNCHPAD, ['function progressBps(address) view returns (uint256)'], provider);
 
-  log(`=== FACTORY PILOT: ${NAME} (${TICKER}) | early ${N_EARLY} + late ${N_LATE} @ ${BUY_ETH} | mode ${RUN ? 'LIVE' : 'DRY'} ===`);
+  log(`=== FACTORY: ${NAME} (${TICKER}) | backer ${backers.length} (early ${Math.min(N_EARLY, backers.length)} + late ${N_LATE}) @ ~${BUY_ETH} | spares ${spares.length} | mode ${RUN ? 'LIVE' : 'DRY'} ===`);
   if (!RUN) { log('dry — berhenti'); return; }
 
   // ---- STEP 1: CREATE ----
@@ -65,31 +74,30 @@ function loadBareKeys(file) {
     const cw = walletOf(creator);
     const fee = await lp.CREATION_FEE();
     const tok = new ethers.Contract(LAUNCHPAD, ['function tokenCount() view returns (uint256)', 'function tokenAt(uint256) view returns (address)'], provider);
-    const before = await tok.tokenCount();
     const uri = require('../src/actions/launch').buildUri({ name: NAME, ticker: TICKER });
     const tx = await lp.connect(cw).create(NAME, TICKER, uri, { value: fee, gasLimit: 3000000n });
     const rc = await tx.wait();
     // mission address = token terakhir (tokenCount naik 1)
     const after = await tok.tokenCount();
-    let mission = await tok.tokenAt(after - 1n);
-    st.mission = mission; st.step = 'early'; st.tsCreate = Date.now();
+    const mission = await tok.tokenAt(after - 1n);
+    st.mission = mission; st.step = 'early'; st.tsCreate = Date.now(); st.name = NAME; st.ticker = TICKER;
     save();
     log(`CREATE OK ✅ mission: ${mission} | tx ${rc.hash.slice(0, 18)}`);
   }
 
-  // ---- STEP 2: EARLY BUYS (6) ----
+  // ---- STEP 2: EARLY BUYS ----
   if (st.step === 'early') {
-    for (let i = 0; i < N_EARLY; i++) {
+    for (let i = 0; i < Math.min(N_EARLY, backers.length); i++) {
       const b = backers[i];
       if (st.buys[b]) continue;
       const w = walletOf(b);
       for (let t = 1; t <= 3; t++) {
         try {
-          const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(BUY_ETH), gasLimit: 3000000n });
+          const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(jitterBuy()), gasLimit: 3000000n });
           await tx.wait();
           st.buys[b] = { kind: 'early', ts: Date.now(), tx: tx.hash };
           save();
-          log(`EARLY ${i + 1}/${N_EARLY} ✅ ${b.slice(0, 10)} ${BUY_ETH} ETH | tx ${tx.hash.slice(0, 18)}`);
+          log(`EARLY ${i + 1} ✅ ${b.slice(0, 10)} | tx ${tx.hash.slice(0, 18)}`);
           break;
         } catch (e) { log(`EARLY ${i + 1} try ${t} ✗ ${String(e.shortMessage || e.message).slice(0, 90)}`); await sleep(8000); }
       }
@@ -101,41 +109,39 @@ function loadBareKeys(file) {
   // ---- STEP 3: WAIT biar backer early held > 60 mnt sebelum lift ----
   if (st.step === 'wait1') {
     const first = Math.min(...Object.values(st.buys).map((x) => x.ts));
-    const target = first + HOLD_MIN * 60000;
-    const wait = Math.max(0, target - Date.now());
-    log(`WAIT1 — nunggu ${(wait / 60000).toFixed(1)} mnt (biar backer early held 60+ mnt saat lift)`);
+    const wait = Math.max(0, first + HOLD_MIN * 60000 - Date.now());
+    log(`WAIT1 — nunggu ${(wait / 60000).toFixed(1)} mnt (early held 60+ mnt saat lift)`);
     await sleep(wait);
     st.step = 'late'; save();
   }
 
-  // ---- STEP 4: LATE BUYS (23) — sampai lift ----
+  // ---- STEP 4: LATE BUYS — sampai lift ----
   if (st.step === 'late') {
-    const prog = new ethers.Contract(LAUNCHPAD, ['function progressBps(address) view returns (uint256)'], provider);
     for (let i = 0; i < N_LATE; i++) {
       if (Number(await prog.progressBps(st.mission)) >= 10000) { log('sudah LIFT sebelum semua late masuk'); break; }
       const b = backers[N_EARLY + i];
-      if (st.buys[b]) continue;
+      if (!b || st.buys[b]) continue;
       const w = walletOf(b);
       for (let t = 1; t <= 3; t++) {
         try {
-          const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(BUY_ETH), gasLimit: 3000000n });
+          const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(jitterBuy()), gasLimit: 3000000n });
           await tx.wait();
           st.buys[b] = { kind: 'late', ts: Date.now(), tx: tx.hash };
           save();
-          const bps = await prog.progressBps(st.mission);
+          const bps = Number(await prog.progressBps(st.mission));
           log(`LATE ${i + 1}/${N_LATE} ✅ ${b.slice(0, 10)} | bps ${bps}${bps >= 10000 ? ' — LIFT! 🚀' : ''}`);
           break;
         } catch (e) { log(`LATE ${i + 1} try ${t} ✗ ${String(e.shortMessage || e.message).slice(0, 90)}`); await sleep(8000); }
       }
       await sleep(20000 + Math.random() * 30000); // jeda 20-50s
     }
-    // top-up pakai spare kalo belum lift
+    // top-up pakai spare kalau belum lift
     let bps = Number(await prog.progressBps(st.mission));
-    for (const sp of spares) {
+    if (USE_SPARES) for (const sp of spares) {
       if (bps >= 10000) break;
       const w = walletOf(sp);
       try {
-        const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(BUY_ETH), gasLimit: 3000000n });
+        const tx = await lp.connect(w).buy(st.mission, 0, { value: ethers.parseEther(jitterBuy()), gasLimit: 3000000n });
         await tx.wait();
         st.buys[sp] = { kind: 'spare', ts: Date.now(), tx: tx.hash }; save();
         bps = Number(await prog.progressBps(st.mission));
@@ -150,8 +156,7 @@ function loadBareKeys(file) {
   // ---- STEP 5: WAIT — semua buy held 60+ mnt baru jual ----
   if (st.step === 'wait2') {
     const lastBuy = Math.max(...Object.values(st.buys).map((x) => x.ts));
-    const target = lastBuy + (HOLD_MIN + 3) * 60000;
-    const wait = Math.max(0, target - Date.now());
+    const wait = Math.max(0, lastBuy + (HOLD_MIN + 3) * 60000 - Date.now());
     log(`WAIT2 — nunggu ${(wait / 60000).toFixed(1)} mnt (hold 60+ mnt semua backer)`);
     await sleep(wait);
     st.step = 'sell'; save();
@@ -182,12 +187,13 @@ function loadBareKeys(file) {
     await sleep(20000);
     const check = async (addr) => { try { const r = await fetch('https://testnet.tzer0.fun/api/points/' + addr, { signal: AbortSignal.timeout(8000) }); return await r.json(); } catch (e) { return null; } };
     const c = await check(creator);
-    log(`VERIFY creator ${creator.slice(0, 10)} → ${JSON.stringify(c)}`);
-    let n = 0;
-    for (const b of Object.keys(st.buys).slice(0, 5)) { const j = await check(b); log(`VERIFY backer ${b.slice(0, 10)} → ${JSON.stringify(j)}`); n++; }
-    st.step = 'done'; st.tsDone = Date.now(); save();
+    log(`VERIFY creator ${creator.slice(0, 10)} → ${JSON.stringify(c && c.total)}`);
+    let sum = 0, n = 0;
+    for (const a of [creator, ...Object.keys(st.buys)]) { const j = await check(a); if (j && typeof j.total === 'number') { sum += j.total; n++; } await sleep(150); }
     const totalSell = Object.values(st.sells).reduce((a, x) => a + Number(x.gain || 0), 0);
-    log(`=== FACTORY PILOT SELESAI: mission ${st.mission} | backers ${Object.keys(st.buys).length} | ETH balik ≈ ${totalSell.toFixed(4)} ===`);
+    st.totalPoints = sum; st.nChecked = n;
+    st.step = 'done'; st.tsDone = Date.now(); save();
+    log(`=== FACTORY SELESAI: ${NAME} | mission ${st.mission} | backers ${Object.keys(st.buys).length} | ETH balik ≈ ${totalSell.toFixed(4)} | poin total wallet peserta ≈ ${sum} (${n} wallet) ===`);
   }
   log('DONE');
 })().catch((e) => { console.error('FATAL', e.message); process.exit(1); });
