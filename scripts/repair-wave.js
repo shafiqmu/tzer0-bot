@@ -38,7 +38,11 @@ if (sh("pgrep -f 'repair-grab[.]js'").length) { console.log('🦾 [wave] skip �
     try { const b = Number(await lp.progressBps(r.address)); if (b < 10000) { const sold = (b / 10000) * 793.1e6; const R = 1.073e8 / (1.073e9 - sold) - 0.1; alive.push({ address: r.address, tail: 0.28335 - R }); } } catch (e) {}
   }
   alive.sort((a, b) => a.tail - b.tail);
-  if (!alive.length) { console.log('🦾 [wave] semua ekor udah kelar/lift — fase wave selesai'); process.exit(0); }
+  if (!alive.length) {
+    const ws = fs.existsSync(path.join(A, 'wave_state.json')) ? JSON.parse(fs.readFileSync(path.join(A, 'wave_state.json'), 'utf8')) : {};
+    if (!ws.allDoneReported) { console.log('🦾 [wave] semua ekor udah kelar/lift — fase wave selesai'); fs.writeFileSync(path.join(A, 'wave_state.json'), JSON.stringify({ allDoneReported: true })); }
+    process.exit(0);
+  }
   const t = alive[0];
   const need = Math.ceil(t.tail / 0.00099) + 2;
   if (free.length < need) process.exit(0); // senyap: belum cukup wallet bebas

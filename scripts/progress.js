@@ -50,6 +50,7 @@ const st = readJSON(P_STATE, { lastFailed: 0, reportedDone: false, lastDone: 0, 
 let heal = 'ok';
 if (complete) heal = 'done';
 else if (stopFlag) heal = 'stop-flag';
+else if (fs.existsSync(path.join(A, 'HOLD'))) heal = 'hold';
 else if (chainAlive || fillAlive || distAlive || launchAlive) heal = 'running';
 else if (missionCount < 14) heal = 'launch-belum-kelar';
 else if (recentLog < 3) heal = 'recent';

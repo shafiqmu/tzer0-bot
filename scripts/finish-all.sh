@@ -20,9 +20,9 @@ for n in 0 1 2 3; do
 done
 echo "[chain] distribute pass2 selesai $(date -Is)"
 
-# 3) isi 4.004 tiket ke 14 mission (resumable, jeda 4-14 dtk ≈4x lebih cepat; dipercepat atas permintaan user 2026-11-07)
-node scripts/fill-runner.js --retry-failed --min-delay 4 --max-delay 14 >> logs/fill.log 2>&1
-node scripts/fill-runner.js --run --min-delay 4 --max-delay 14 >> logs/fill.log 2>&1
+# 3) isi 4.004 tiket ke 14 mission (resumable, jeda 3-8 dtk — dipercepat 2x lagi atas permintaan user 2026-11-07 sore)
+node scripts/fill-runner.js --retry-failed --min-delay 3 --max-delay 8 >> logs/fill.log 2>&1
+node scripts/fill-runner.js --run --min-delay 3 --max-delay 8 >> logs/fill.log 2>&1
 echo "[chain] fill selesai $(date -Is)"
 
 # 4) sweep poin 1.000 wallet + status mission
