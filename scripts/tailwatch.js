@@ -24,6 +24,11 @@ const A = '/home/ubuntu/tzer0-bot/analysis';
       msgs.push(`${r.address.slice(0, 10)}… (ekor ${r.tail}) bps ${old}→${bps}${bps >= 10000 ? ' — LIFT/HILANG!' : ''}`);
     }
   }
+  // cek web tzero — lapor cuma pas balik UP
+  let siteUp = false;
+  try { const r = await fetch('https://testnet.tzer0.fun/', { signal: AbortSignal.timeout(15000) }); siteUp = r.status === 200; } catch (e) {}
+  if (siteUp && st.__siteUp === false) msgs.push('🌐 web testnet.tzer0.fun BALIK UP lagi!');
+  now.__siteUp = siteUp;
   fs.writeFileSync(stPath, JSON.stringify(now));
   if (msgs.length) console.log('🦎 [tzero] kandidat ekor gerak:\n' + msgs.join('\n'));
 })().catch((e) => console.error('tailwatch err:', e.message));
