@@ -7,36 +7,46 @@ const ROOT = path.join(__dirname, '..');
 const A = path.join(ROOT, 'analysis');
 const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(A, f), 'utf8')); } catch (e) { return null; } };
 
-const cs = read('campaign_state.json');
+const pilot = read('factory_state.json');
+const line = read('line_state.json');
 const out = [];
-if (!cs) {
-  const pilot = read('factory_state.json');
-  if (pilot) out.push(`🏭 Pabrik: fase pilot (mission 1) — tahap: ${pilot.step}`);
-  else out.push('🏭 Pabrik: belum mulai.');
+
+const pilotName = (pilot && pilot.name) || 'Nimbus Foundry';
+const pilotStep = pilot ? pilot.step : '?';
+const pilotDone = pilot && pilot.step === 'done';
+
+if (!line) {
+  out.push(pilotDone ? `✅ Mission 1 (${pilotName}) KELAR — poin peserta ≈ ${pilot.totalPoints || '?'}`
+    : `🏭 Mission 1 (${pilotName}) — tahap: ${pilotStep}`);
 } else {
-  const done = cs.missions.filter((m) => m.ok);
-  const totalPts = cs.missions.reduce((a, m) => a + (Number(m.points) || 0), 0);
-  const usedW = 36 + Math.min(cs.nextWindow || 0, 999) * 28; // approx
-  if (cs.status === 'waiting-pilot') {
-    const pilot = read('factory_state.json') || {};
-    out.push(`🏭 Pabrik: nunggu mission 1 (pilot) kelar — tahap: ${pilot.step || '?'} (${pilot.name || 'Nimbus Foundry'})`);
-  } else if (cs.status === 'running') {
-    const cur = read(fs.existsSync(path.join(A, 'campaign_state.json')) ? 'campaign_state.json' : '') || cs;
-    const mN = (cs.nextWindow || 0) + 2;
-    // state mission yg sedang jalan (kalau ada)
-    const stPath = `factory_m${mN}_state.json`;
-    const ms = read(stPath);
-    const steps = { create: 'bikin mission', early: 'backer awal masuk', wait1: 'nunggu hold 60 mnt', late: 'backer terakhir masuk (nunggu lift)', wait2: 'nunggu hold abis lift', sell: 'jual token (balikin duit)', verify: 'cek poin' };
-    out.push(`🏭 Pabrik jalan: mission ${mN} (${ms && ms.name ? ms.name : '?'}) — ${ms ? (steps[ms.step] || ms.step) : 'siap-siap'}`);
-    out.push(`✅ Udah kelar: ${done.length + 1} mission · 💰 Poin kekumpul ≈ ${totalPts.toLocaleString('id-ID')} · 📦 Wallet kepake ≈ ${usedW}/1000`);
-    const last = done[done.length - 1];
-    if (last) out.push(`↩️ Terakhir: ${last.name} (${last.ticker}) → poin ${Number(last.points || 0).toLocaleString('id-ID')} · mission ${String(last.mission || '').slice(0, 10)}…`);
-  } else if (cs.status === 'done') {
-    out.push(`🏆 PABRIK SELESAI SEMUA! ${cs.missions.length} mission · poin total ≈ ${totalPts.toLocaleString('id-ID')}`);
-  } else if (cs.status === 'stuck') {
-    out.push(`⚠️ Pabrik MACET di window ${cs.nextWindow + 1} — perlu dicek (state aman, bisa lanjut).`);
-  } else if (cs.status === 'stopped') {
-    out.push('🛑 Pabrik berhenti (STOP file aktif).');
+  const missions = line.missions || [];
+  const settled = missions.filter((m) => m.phase === 'settled' && m.ok);
+  const seeded = missions.filter((m) => m.phase === 'seeded');
+  const bursting = missions.filter((m) => m.phase === 'burst');
+  const seeding = missions.find((m) => m.phase === 'seeding');
+  const totalPts = settled.reduce((a, m) => a + (Number(m.points) || 0), 0) + (pilotDone ? Number(pilot.totalPoints || 0) : 0);
+  const doneCount = settled.length + (pilotDone ? 1 : 0);
+  const usedW = 36 + missions.reduce((a, m) => a + (m.wallets ? m.wallets.length : 0), 0);
+
+  if (line.status === 'waiting-pilot') {
+    out.push(`🏭 Jalur pipa nyala — nunggu mission 1 (${pilotName}) lift dulu (sekarang: ${pilotStep})`);
+  } else if (line.status === 'running') {
+    out.push(`🏭 Pabrik cepat jalan: ${doneCount}/35 mission kelar · ⭐ poin ≈ ${totalPts.toLocaleString('id-ID')} · 📦 wallet kepake ≈ ${usedW}/1000`);
+    const bits = [];
+    if (bursting.length) bits.push(`#${bursting.map((m) => m.n).join(',#')} lagi DIISI PENUH 🚀`);
+    if (seeded.length) bits.push(`${seeded.length} mission lagi "dipanasin" (umur 60 mnt)`);
+    if (seeding) bits.push(`#${seeding.n} (${seeding.name}) baru diproduksi`);
+    out.push('⏳ ' + (bits.join(' · ') || 'siap-siap'));
+    const last = settled[settled.length - 1];
+    if (last) out.push(`↩️ Terakhir kelar: ${last.name} (${last.ticker}) → poin ${Number(last.points || 0).toLocaleString('id-ID')}`);
+  } else if (line.status === 'done') {
+    out.push(`🏆 PABRIK KELAR SEMUA! ${doneCount} mission · poin total ≈ ${totalPts.toLocaleString('id-ID')}`);
+  } else if (line.status === 'stuck') {
+    out.push(`⚠️ Jalur macet — perlu dicek (state aman, bisa lanjut). Cek logs/line.log`);
+  } else if (line.status === 'stopped') {
+    out.push('🛑 Jalur berhenti (STOP aktif).');
+  } else {
+    out.push(`🏭 Jalur status: ${line.status} · ${doneCount} mission kelar`);
   }
 }
 console.log(out.join('\n'));
