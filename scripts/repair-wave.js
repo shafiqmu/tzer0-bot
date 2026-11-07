@@ -13,6 +13,7 @@ const sh = (c) => { try { return execSync(c, { stdio: ['ignore', 'pipe', 'ignore
 
 if (fs.existsSync(path.join(A, 'STOP'))) process.exit(0);
 if (sh("pgrep -f 'repair-grab[.]js'").length) { console.log('🦾 [wave] skip — grab masih jalan'); process.exit(0); }
+if (sh("pgrep -f 'sell-batch[.]js'").length) { console.log('🦾 [wave] skip — sweep jual jalan'); process.exit(0); }
 
 (async () => {
   const f = JSON.parse(fs.readFileSync(path.join(A, 'fill_state.json'), 'utf8'));

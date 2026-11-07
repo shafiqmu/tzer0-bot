@@ -16,6 +16,9 @@ const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] :
 const MIN_D = Number(arg('--min-delay', 3));
 const MAX_D = Number(arg('--max-delay', 8));
 const MAX = Number(arg('--max', 0)) || Infinity;
+const LANE = Number(arg('--lane', -1));       // -1 = tanpa partisi
+const OF = Number(arg('--of', 1));
+const REBUILD = argv.includes('--rebuild');    // tunggu mesin lain → rebuild target → mulai
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -28,11 +31,31 @@ function busy(names) {
   }
   return null;
 }
+async function waitQuiet() {
+  let b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']); let w = 0;
+  while (b && w < 10800) {
+    if (w === 0) console.log('⏳ nunggu mesin lain selesai (' + b + ')...');
+    await sleep(60000); w += 60;
+    if (fs.existsSync(path.join(A, 'STOP'))) return false;
+    b = busy(['finish-all.sh', 'fill-runner.js', 'repair-grab.js']);
+  }
+  return true;
+}
 
 (async () => {
-  const targets = rd('sell_targets.json', []);
+  if (REBUILD) {
+    if (!(await waitQuiet())) return;
+    console.log('rebuild targets...');
+    spawnSync('node', ['scripts/build-sell-targets.js'], { cwd: ROOT, encoding: 'utf8', stdio: 'inherit' });
+  }
+  let targets = rd('sell_targets.json', []);
   if (!targets.length) { console.log('sell_targets.json kosong — jalanin build-sell-targets.js dulu'); return; }
-  const state = rd('sell_state.json', { done: {}, empty: {}, fail: {} });
+  if (LANE >= 0) {
+    targets = targets.filter((t) => Number(require('crypto').createHash('md5').update(t.wallet.toLowerCase() + '|' + String(t.mission).toLowerCase()).digest('hex').slice(0, 8), 16) % OF === LANE);
+  }
+  console.log(`lane ${LANE >= 0 ? LANE + '/' + OF : 'all'} | ${targets.length} target | mode ${MODE}`);
+  const stateFile = LANE >= 0 ? `sell_state_${LANE}.json` : 'sell_state.json';
+  const state = rd(stateFile, { done: {}, empty: {}, fail: {} });
   let sent = 0, empty = 0, fail = 0, recovered = 0n;
   const { ethers } = require('ethers');
   const provider = new ethers.JsonRpcProvider(RPC);
@@ -76,7 +99,7 @@ function busy(names) {
       fail++;
       console.log(`⚠️ fail | ${t.wallet.slice(0, 10)}×${String(t.mission).slice(0, 10)} | ${last.slice(0, 90)}`);
     }
-    wr('sell_state.json', state);
+    wr(stateFile, state);
     await sleep((MIN_D + Math.random() * Math.max(0, MAX_D - MIN_D)) * 1000);
   }
   console.log(`\n🏁 Sweep selesai: jual ${sent} | kosong ${empty} | gagal ${fail} | recovery ≈ ${ethers ? ethers.formatEther(recovered) : recovered} ETH`);
