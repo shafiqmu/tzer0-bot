@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     'function getReserves() view returns (uint112,uint112,uint32)',
     'function token0() view returns (address)',
     'function token1() view returns (address)',
-    'function swap(uint256,uint256,address)'], provider);
+    'function swap(uint256,uint256,address)', 'function skim(address)'], provider);
   const wethC = new ethers.Contract(WNATIVE, [
     'function balanceOf(address) view returns (uint256)',
     'function withdraw(uint256)'], provider);
@@ -88,7 +88,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const tx1 = await tok.connect(wallet).transfer(pairAddr, amount, { gasLimit: 120000n });
       await tx1.wait();
       console.log('  transfer → pair ok', String(tx1.hash).slice(0, 18));
-      const args = sellSide === 1 ? [outSafe, 0n, wallet.address, '0x'] : [0n, outSafe, wallet.address, '0x'];
+      const args = sellSide === 1 ? [outSafe, 0n, wallet.address] : [0n, outSafe, wallet.address];
       const tx2 = await pair.connect(wallet).swap(...args, { gasLimit: 250000n });
       await tx2.wait();
       console.log('  swap ok', String(tx2.hash).slice(0, 18));
@@ -103,5 +103,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await sleep(4000);
     }
   }
-  console.log('gagal 3x — coba lagi nanti');
+  // semua attempt gagal — tarik balik token yg mungkin nyangkut di pair (skim)
+  try {
+    const sk = await pair.connect(wallet).skim(wallet.address, { gasLimit: 150000n });
+    await sk.wait();
+    console.log('gagal 3x — token ditarik balik (skim ok)');
+  } catch (e) {
+    console.log('gagal 3x — token mungkin nyangkut di pair:', String(e.shortMessage || e.message).slice(0, 90));
+  }
 })().catch((e) => { console.error('FATAL', e.message); process.exit(1); });
