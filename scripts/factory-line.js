@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// factory-line.js — JALUR PIPA CEPAT: 1 mission di-BURST (diisi penuh) pada satu waktu,
-// tapi beberapa mission berikutnya "dipanasi" (seed 6 backer) bareng — umur 60-menitnya jalan paralel.
-// Hasil: burst tiap ~7-10 menit begitu jalan → 35 mission ≈ 6-8 jam (bukan 4-5 hari).
-// Alur per mission: fund → create (+6 seed beli) → [umur 61 mnt, diem di background] → burst 23 beli → LIFT → jual pas umurnya → verify.
-// Kill-switch: analysis/STOP (exit), analysis/HOLD (pause). State: analysis/line_state.json.
+// factory-line.js v3 — JALUR "FASE A + PEMICU" (crew penuh):
+//   Tiap mission: fund → create + FASE A (27 backer beli, umur 60-mntjalan paralel) → [aged 61 mnt]
+//   → PEMICU (backer terakhir isi sisa kurva → LIFTOFF; backer fase A udah umur 61+ & masih pegang → crew penuh)
+//   → semua backer jual (pas umurnya) → wallet pemicu dijual telat (61 mnt) oleh sweeper → verify.
+//   Pemicu jalan SATU-SATU. Kill-switch: analysis/STOP (exit), analysis/HOLD (pause). State: analysis/line_state.json.
 // Usage: node scripts/factory-line.js --run [--dry]
 'use strict';
 const fs = require('fs');
@@ -17,10 +17,11 @@ const argv = process.argv.slice(2);
 const RUN = argv.includes('--run');
 const DRY = argv.includes('--dry');
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
-const LATEST_NEED = 0.30; // ETH gross target per mission (kebutuhan lift ≈0.2863 + margin; sisa direfund kontrak)
-const EARLY = 6;           // jumlah backer "pemanasan" per mission
-const MAX_QUEUE = 6;       // maks mission dipanasin bareng
-const AGE_MS = 61 * 60000; // umur minimum seed sebelum burst (60 mnt + buffer)
+const A_BUY = 0.0102;        // beli Fase A (≥0.01)
+const MAXA = 27;             // maks wallet fase A
+const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
+const MAX_QUEUE = 8;         // maks mission "aged" nunggu umur bareng
+const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
   ['Cinder Relay', 'CNDR'], ['Harbor Nine', 'HRB9'], ['Vela Works', 'VELA'], ['Kite & Ember', 'KITE'],
   ['Salt Signal', 'SLTS'], ['Emberline', 'EMBR'], ['North Quay', 'NQAY'], ['Glass Harbor', 'GLHR'],
@@ -41,6 +42,7 @@ const fmt = (n) => String(Math.round(n * 1e6) / 1e6);
 const say = (...xs) => console.log(`[${new Date().toISOString()}] ${xs.join(' ')}`);
 const hasProc = (pat) => { try { return execSync(`pgrep -f "${pat}"`, { encoding: 'utf8' }).trim().length > 0; } catch (e) { return false; } };
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return null; } };
+const ACTIVE_PHASES = ['seeding', 'aged', 'trigger'];
 
 function loadLine() {
   return readJson(LINE_STATE) || { status: 'waiting-pilot', nextWindow: 0, missions: [], startedAt: Date.now() };
@@ -58,20 +60,25 @@ function buildWindows() {
   return wins;
 }
 const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8')).filter((p) => p.role === 'spare').map((p) => p.addr); } catch (e) { return []; } })();
+const spawnDetached = (args, logFile) => {
+  const out = fs.openSync(path.join(ROOT, logFile), 'a');
+  const c = spawn('node', args, { cwd: ROOT, detached: true, stdio: ['ignore', out, out] });
+  c.unref();
+};
 
 (async () => {
   const wins = buildWindows();
   if (DRY) { say(`DRY: ${wins.length} window | ${wins.map((w) => w.length).join(',')} | total ${wins.reduce((a, w) => a + w.length, 0)} + pilot 36`); return; }
   if (!RUN) { say('butuh --run'); return; }
   const st = loadLine();
-  // restart-safe: mission yg fase-nya nyangkut 'seeding' (proses mati mid-produksi) → ulang dari window itu
-  // (fund idempotent, create di-skip via state file, seed beli yg udah jalan di-skip)
+  // migrasi nama fase v2 → v3 (seeded→aged, burst→trigger) + restart-safe (seeding/stuck diulang)
+  for (const m of st.missions) { if (m.phase === 'seeded') m.phase = 'aged'; if (m.phase === 'burst') m.phase = 'trigger'; }
   const bad = st.missions.filter((m) => m.phase === 'seeding' || m.phase === 'stuck');
   if (bad.length) { st.missions = st.missions.filter((m) => m.phase !== 'seeding' && m.phase !== 'stuck'); st.nextWindow = Math.max(0, st.nextWindow - bad.length); saveLine(st); }
 
-  // === FASE 0: tunggu pilot LIFTED (state wait2/sell/verify/done) + auto-resume pilot kalau mati ===
+  // === FASE 0: tunggu pilot LIFTED + auto-resume pilot kalau mati ===
   if (st.status === 'waiting-pilot') {
-    say(`JALUR PIPA start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
+    say(`JALUR v3 start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
     for (;;) {
       if (fs.existsSync(path.join(A, 'STOP'))) { st.status = 'stopped'; saveLine(st); say('STOP — keluar.'); return; }
       const ps = readJson(PILOT_STATE);
@@ -88,52 +95,70 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
 
   // === FASE 1: loop produksi ===
   if (st.status !== 'running' && st.status !== 'done' && st.status !== 'stopped') { st.status = 'running'; saveLine(st); }
-  let stallTicks = 0;
   for (;;) {
     if (fs.existsSync(path.join(A, 'STOP'))) { st.status = 'stopped'; saveLine(st); say('STOP — jalur berhenti.'); return; }
     if (fs.existsSync(path.join(A, 'HOLD'))) { await sleep(30000); continue; }
 
     // -- sinkron status mission dari state file --
     for (const m of st.missions) {
-      if (m.phase === 'burst') {
-        const ms = readJson(path.join(ROOT, m.stateFile));
+      const ms = readJson(path.join(ROOT, m.stateFile));
+      if (m.phase === 'trigger') {
         if (ms && ms.step === 'done') {
-          m.phase = 'settled'; m.ok = true; m.points = ms.totalPoints; m.mission = ms.mission; m.settledTs = Date.now();
+          m.phase = 'settled'; m.ok = true; m.points = ms.totalPoints; m.mission = ms.mission;
+          m.triggerAddr = ms.triggerAddr; m.triggerTs = ms.triggerTs; m.settledTs = Date.now();
           saveLine(st);
           say(`MISSION #${m.n} (${m.name}) SELESAI ✅ poin ≈ ${ms.totalPoints}`);
-        } else if (Date.now() - (m.burstTs || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
-          say(`⚠️ #${m.n} burst-child mati di step ${ms ? ms.step : '?'} — resume...`);
-          const out = fs.openSync(path.join(ROOT, m.logFile), 'a');
-          const c = spawn('node', ['scripts/factory-mission.js', '--run', '--phase', 'burst', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker, '--buyeth', String(m.buy)], { cwd: ROOT, detached: true, stdio: ['ignore', out, out] });
-          c.unref();
+        } else if (Date.now() - (m.triggerTs || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
+          say(`⚠️ #${m.n} pemicu mati di step ${ms ? ms.step : '?'} — resume...`);
+          spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
         }
+      } else if (m.phase === 'seeding') {
+        if (ms && ['aged', 'trigger', 'sell', 'verify', 'done'].includes(ms.step)) {
+          if (ms.step === 'done') { m.phase = 'settled'; m.ok = true; m.points = ms.totalPoints; m.mission = ms.mission; }
+          else {
+            const ts = Math.max(...Object.values(ms.buys || {}).map((x) => x.ts || 0), Date.now() - 1000);
+            m.phase = 'aged'; m.seededTs = ts; m.mission = ms.mission;
+          }
+          saveLine(st);
+          say(`#${m.n} (${m.name}) FASE A ✅ → aged`);
+        } else if (Date.now() - (m.createdTs || 0) > 4 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
+          say(`⚠️ #${m.n} seed-child mati di step ${ms ? ms.step : '?'} — resume...`);
+          spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
+        }
+      } else if (m.phase === 'settled' && m.triggerAddr && !m.triggerSold && Date.now() - (m.triggerTs || 0) > AGE_MS + 60000) {
+        // jual token wallet pemicu (telat 61 mnt biar fuel-nya aman)
+        spawnDetached(['scripts/sell-token.js', '--wallet', m.triggerAddr, '--mission', m.mission, '--run'], m.logFile);
+        m.triggerSold = true; saveLine(st);
+        say(`🧹 jual token wallet pemicu #${m.n} (${m.triggerAddr.slice(0, 10)})...`);
       }
     }
 
-    // -- B: BURST mission paling tua yang umurnya udah 61+ mnt (satu-satu) --
-    const bursting = st.missions.some((m) => m.phase === 'burst');
-    if (!bursting) {
-      const cand = st.missions.find((m) => m.phase === 'seeded' && Date.now() - m.seededTs >= AGE_MS);
+    // -- B: PEMICU mission paling tua yang umurnya udah 61+ mnt (satu-satu) --
+    const triggering = st.missions.some((m) => m.phase === 'trigger');
+    if (!triggering) {
+      const cand = st.missions.find((m) => m.phase === 'aged' && Date.now() - m.seededTs >= AGE_MS);
       if (cand) {
-        cand.phase = 'burst'; cand.burstTs = Date.now(); saveLine(st);
-        say(`BURST #${cand.n} (${cand.name}) — ${cand.wallets.length} wallet, umur ${((Date.now() - cand.seededTs) / 60000).toFixed(1)} mnt 🚀`);
-        const out = fs.openSync(path.join(ROOT, cand.logFile), 'a');
-        const c = spawn('node', ['scripts/factory-mission.js', '--run', '--phase', 'burst', '--plan', cand.planFile, '--state', cand.stateFile, '--log', cand.logFile, '--name', cand.name, '--ticker', cand.ticker, '--buyeth', String(cand.buy)], { cwd: ROOT, detached: true, stdio: ['ignore', out, out] });
-        c.unref();
+        cand.phase = 'trigger'; cand.triggerTs = Date.now(); saveLine(st);
+        say(`PEMICU #${cand.n} (${cand.name}) — umur ${((Date.now() - cand.seededTs) / 60000).toFixed(1)} mnt, sisa kurva disamber 🚀`);
+        spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', cand.planFile, '--state', cand.stateFile, '--log', cand.logFile, '--name', cand.name, '--ticker', cand.ticker], cand.logFile);
       }
     }
 
-    // -- A: PRODUKSI mission berikutnya (fund → create + seed) kalau antrian belum penuh --
+    // -- A: PRODUKSI mission berikutnya (fund → create + FASE A) kalau antrian belum penuh --
     const seeding = st.missions.some((m) => m.phase === 'seeding');
-    const queue = st.missions.filter((m) => m.phase === 'seeded').length;
+    const queue = st.missions.filter((m) => m.phase === 'aged').length;
     if (!seeding && queue < MAX_QUEUE && st.nextWindow < wins.length) {
       const wi = st.nextWindow;
       const chunk = wins[wi];
       const mN = wi + 2;
-      const nBackers = Math.max(1, chunk.length - 1);
       const creator = chunk[0];
       const backers = chunk.slice(1);
-      const buy = Math.max(0.01, Math.min(0.5, LATEST_NEED / nBackers));
+      const aCount = Math.min(MAXA, Math.max(1, backers.length - 1));
+      const trigger = backers[backers.length - 1];
+      const phaseA = backers.slice(0, aCount);
+      const skipped = backers.slice(aCount, backers.length - 1);
+      const gap = Math.max(0.001, LIFT_NET - aCount * A_BUY * 0.99);
+      const trigWant = gap * 1.12 / 0.99 + 0.0015;
       const [name, ticker] = NAMES[wi % NAMES.length];
       const planFile = `analysis/line_m${mN}_plan.json`;
       const fundFile = `analysis/line_m${mN}_fund.json`;
@@ -141,9 +166,9 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
       const logFile = `logs/line_m${mN}.log`;
       const exclFile = `analysis/line_m${mN}_exclude.txt`;
 
-      const m = { n: mN, name, ticker, wallets: chunk, planFile, fundFile, stateFile, logFile, buy, phase: 'seeding', createdTs: Date.now() };
+      const m = { n: mN, name, ticker, wallets: chunk, planFile, fundFile, stateFile, logFile, buy: A_BUY, skipped, phase: 'seeding', createdTs: Date.now() };
       st.missions.push(m); st.nextWindow++; saveLine(st);
-      say(`── PRODUKSI #${mN} (${name}/${ticker}) | ${chunk.length} wallet | buy ≈ ${fmt(buy)} ──`);
+      say(`── PRODUKSI #${mN} (${name}/${ticker}) | ${chunk.length} wallet | faseA ${aCount}×${A_BUY} | pemicu ${trigger.slice(0, 10)} | skip ${skipped.length} ──`);
 
       fs.writeFileSync(path.join(ROOT, planFile), JSON.stringify([
         { role: 'creator', addr: creator },
@@ -152,12 +177,13 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
       ], null, 1));
       fs.writeFileSync(path.join(ROOT, fundFile), JSON.stringify([
         { addr: creator, want: '0.0028' },
-        ...backers.map((b) => ({ addr: b, want: fmt(buy + 0.0015) })),
+        ...phaseA.map((b) => ({ addr: b, want: fmt(A_BUY + 0.0015) })),
+        { addr: trigger, want: fmt(trigWant) },
         ...SPARES.map((s) => ({ addr: s, want: '0.0055' })),
       ], null, 1));
-      // exclude: wallet mission yang BELUM burst (duitnya jangan diambil) + spares
+      // exclude: wallet mission yang BELUM kelar (semua duitnya dijagain) + spares
       const excl = new Set(SPARES.map((x) => x.toLowerCase()));
-      for (const mm of st.missions) if (['seeding', 'seeded', 'burst'].includes(mm.phase)) for (const w of mm.wallets) excl.add(w.toLowerCase());
+      for (const mm of st.missions) if (ACTIVE_PHASES.includes(mm.phase) && mm.n !== mN) for (const w of mm.wallets) excl.add(w.toLowerCase());
       fs.writeFileSync(path.join(ROOT, exclFile), [...excl].join('\n'));
 
       say(`funding #${mN}...`);
@@ -173,17 +199,18 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
         if (shortTotal <= 0.004 && gFail === 0) funded = true;
         else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH / ${gFail} tx gagal — tunggu 75s (duit dari jualan balik)... [${tr}/10]`); await sleep(75000); }
       }
-      if (!funded) say(`⚠️ funding #${mN} pas-pasan — lanjut (spare & refund jaga).`);
+      if (!funded) say(`⚠️ funding #${mN} pas-pasan — lanjut.`);
       await sleep(4000);
-      say(`create + seed #${mN}...`);
-      spawnSync('node', ['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', planFile, '--state', stateFile, '--log', logFile, '--name', name, '--ticker', ticker, '--buyeth', fmt(buy)], { cwd: ROOT, stdio: 'inherit', timeout: 1800000 });
-      const ms = readJson(path.join(ROOT, stateFile));
-      if (ms && (ms.step === 'seeded' || ms.step === 'late' || ms.step === 'sell')) {
-        m.phase = 'seeded'; m.seededTs = Date.now(); m.mission = ms.mission; saveLine(st);
-        say(`#${mN} SEEDED ✅ (umur jalan) | mission ${ms.mission}`);
+      say(`create + FASE A #${mN}...`);
+      spawnSync('node', ['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', planFile, '--state', stateFile, '--log', logFile, '--name', name, '--ticker', ticker], { cwd: ROOT, stdio: 'inherit', timeout: 1800000 });
+      const ms2 = readJson(path.join(ROOT, stateFile));
+      if (ms2 && ['aged', 'trigger', 'sell'].includes(ms2.step)) {
+        const ts = Math.max(...Object.values(ms2.buys || {}).map((x) => x.ts || 0), Date.now() - 1000);
+        m.phase = 'aged'; m.seededTs = ts; m.mission = ms2.mission; saveLine(st);
+        say(`#${mN} FASE A ✅ (umur jalan) | mission ${ms2.mission}`);
       } else {
         m.phase = 'stuck'; saveLine(st);
-        say(`⚠️ #${mN} seed gagal (step ${ms ? ms.step : '?'}) — jalur pause.`);
+        say(`⚠️ #${mN} seed gagal (step ${ms2 ? ms2.step : '?'}) — jalur pause.`);
         fs.writeFileSync(path.join(A, 'LINE_STUCK'), String(mN));
         st.status = 'stuck'; saveLine(st);
         return;
@@ -191,16 +218,16 @@ const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'fa
     }
 
     // -- selesai semua? --
-    const active = st.missions.some((m) => ['seeding', 'seeded', 'burst'].includes(m.phase));
+    const active = st.missions.some((m) => ACTIVE_PHASES.includes(m.phase));
     if (st.nextWindow >= wins.length && !active) {
       st.status = 'done'; saveLine(st);
       const pts = st.missions.reduce((a, m) => a + (Number(m.points) || 0), 0);
-      say(`=== JALUR PIPA SELESAI: ${st.missions.length} mission (+pilot) | poin ≈ ${pts} ===`);
+      say(`=== JALUR v3 SELESAI: ${st.missions.length} mission (+pilot) | poin ≈ ${pts} ===`);
       return;
     }
-    // -- deteksi macet: produksi stop & gak ada yg aktif (queue kosong, no seed, no burst) padahal window sisa --
-    const anyActive = st.missions.some((m) => ['seeding', 'seeded', 'burst'].includes(m.phase));
-    const newestTs = st.missions.reduce((a, m) => Math.max(a, m.createdTs || 0, m.seededTs || 0, m.burstTs || 0), 0);
+    // -- deteksi macet --
+    const anyActive = st.missions.some((m) => ACTIVE_PHASES.includes(m.phase));
+    const newestTs = st.missions.reduce((a, m) => Math.max(a, m.createdTs || 0, m.seededTs || 0, m.triggerTs || 0, m.settledTs || 0), 0);
     if (!anyActive && st.nextWindow < wins.length && Date.now() - Math.max(newestTs, st.startedAt || 0) > 20 * 60000) {
       say('⚠️ produksi diam 20 mnt — pause biar dicek.'); st.status = 'stuck'; saveLine(st); fs.writeFileSync(path.join(A, 'LINE_STUCK'), 'stall'); return;
     }
