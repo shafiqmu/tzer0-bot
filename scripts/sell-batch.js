@@ -81,13 +81,12 @@ async function waitQuiet() {
       if (b) console.log('(dry) mesin lain jalan:', b);
     }
     if (MODE === 'dry') { console.log('dry target:', t.wallet.slice(0, 10), '×', String(t.mission).slice(0, 10)); continue; }
-    const eth0 = await provider.getBalance(t.wallet);
     const r = spawnSync('node', ['scripts/sell-token.js', '--wallet', t.wallet, '--mission', t.mission, '--run'], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
     const out = (r.stdout || '') + (r.stderr || '');
     const last = out.trim().split('\n').filter(Boolean).slice(-1)[0] || '';
     if (/DONE ✅/.test(out)) {
-      const eth1 = await provider.getBalance(t.wallet);
-      const gain = eth1 - eth0;
+      const mm = out.match(/WETH diterima: ([\d.]+)/);
+      const gain = mm ? ethers.parseEther(mm[1]) : 0n;
       recovered += gain;
       state.done[key] = { ts: Date.now(), gainWei: gain.toString(), out: last.slice(0, 120) };
       sent++;
