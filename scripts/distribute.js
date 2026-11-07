@@ -66,7 +66,12 @@ async function main() {
   console.log(`   saldo: ${ethers.formatEther(bal)} ETH`);
   console.log(`📋 Slice: ${entries.length} wallet | total sebar: ${sliceTotal.toFixed(6)} ETH | belum kena: ${pending.length} | mode: ${dry ? 'DRY' : 'LIVE'}`);
 
-  const need = ethers.parseEther(sliceTotal.toFixed(6)) + ethers.parseEther('0.008');
+  if (pending.length === 0) {
+    console.log('✅ Semua sudah terkirim — tidak ada yang perlu dikirim (skip).');
+    return;
+  }
+  const pendingTotal = pending.reduce((s, [, v]) => s + v, 0);
+  const need = ethers.parseEther(pendingTotal.toFixed(6)) + ethers.parseEther('0.008');
 
   if (dry) {
     pending.slice(0, 5).forEach(([a, v]) => console.log(`   [contoh] ${a} ← ${v}`));
