@@ -51,7 +51,7 @@ async function waitQuiet() {
   let targets = rd('sell_targets.json', []);
   if (!targets.length) { console.log('sell_targets.json kosong — jalanin build-sell-targets.js dulu'); return; }
   if (LANE >= 0) {
-    targets = targets.filter((t) => Number(require('crypto').createHash('md5').update(t.wallet.toLowerCase() + '|' + String(t.mission).toLowerCase()).digest('hex').slice(0, 8), 16) % OF === LANE);
+    targets = targets.filter((t) => parseInt(require('crypto').createHash('md5').update(t.wallet.toLowerCase() + '|' + String(t.mission).toLowerCase()).digest('hex').slice(0, 8), 16) % OF === LANE);
   }
   console.log(`lane ${LANE >= 0 ? LANE + '/' + OF : 'all'} | ${targets.length} target | mode ${MODE}`);
   const stateFile = LANE >= 0 ? `sell_state_${LANE}.json` : 'sell_state.json';
