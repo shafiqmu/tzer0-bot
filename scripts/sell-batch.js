@@ -85,7 +85,7 @@ async function waitQuiet() {
     const out = (r.stdout || '') + (r.stderr || '');
     const last = out.trim().split('\n').filter(Boolean).slice(-1)[0] || '';
     if (/DONE ✅/.test(out)) {
-      const mm = out.match(/WETH diterima: ([\d.]+)/);
+      const mm = out.match(/quote ≈ ([\d.]+) ETH/) || out.match(/WETH diterima: ([\d.]+)/);
       const gain = mm ? ethers.parseEther(mm[1]) : 0n;
       recovered += gain;
       state.done[key] = { ts: Date.now(), gainWei: gain.toString(), out: last.slice(0, 120) };
@@ -97,6 +97,7 @@ async function waitQuiet() {
       state.fail[key] = { ts: Date.now(), err: last.slice(0, 200) };
       fail++;
       console.log(`⚠️ fail | ${t.wallet.slice(0, 10)}×${String(t.mission).slice(0, 10)} | ${last.slice(0, 90)}`);
+      try { fs.appendFileSync(path.join(ROOT, 'logs', 'sell-fails.log'), `\n== ${t.wallet} x ${t.mission} ==\n${out.slice(-1500)}\n`); } catch (e) {}
     }
     wr(stateFile, state);
     await sleep((MIN_D + Math.random() * Math.max(0, MAX_D - MIN_D)) * 1000);
