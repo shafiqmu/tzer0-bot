@@ -74,10 +74,10 @@ function spawnSeed() {
     const ts = Math.max(0, ...Object.values(st.buys || {}).map((x) => x.ts || 0));
     const ageMin = ts ? (Date.now() - ts) / 60000 : 0;
     say(`status: buys ${nBuy}/27 | umur ${ts ? ageMin.toFixed(1) : '-'} mnt`);
-    if (nBuy >= 24 && ageMin >= 62) { say('siap — funding pemicu.'); break; }
+    if (nBuy >= 24 && ageMin >= 60.35) { say('siap (hold 60m✓) — funding pemicu.'); break; }
     if (ageMin >= 95 && nBuy >= 20) { say('kepepet umur — funding pemicu (crew parsial).'); break; }
     if (ageMin >= 115) { say('hard-cap — funding apa adanya.'); break; }
-    if (nBuy < 27 && ageMin < 62) {
+    if (nBuy < 24 && ageMin < 62) {
       if (hasProc('--phase seed', `line_m${N}_plan`)) { say('seed-child kita masih jalan — biarin.'); }
       else {
         if (Date.now() - lastRefill > 20 * 60000) {
