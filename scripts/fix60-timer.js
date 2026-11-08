@@ -43,6 +43,7 @@ function spawnSeed() {
 
 (async () => {
   let lastRefill = 0;
+  let lastSeedSpawn = 0;
   for (;;) {
     const st = readJson(stF);
     const nBuy = Object.keys(st.buys || {}).length;
@@ -65,7 +66,8 @@ function spawnSeed() {
           process.stdout.write((r.stdout || '').split('\n').slice(-4).join('\n') + '\n');
         }
         say(nBuy === 0 ? 'belum ada beli — spawn seed-child awal.' : 'lanjut beli sisa — respawn seed-child.');
-        spawnSeed();
+        if (Date.now() - lastSeedSpawn > 10 * 60000) { lastSeedSpawn = Date.now(); spawnSeed(); }
+        else say('seed-child baru aja jalan — cooldown 10 mnt.');
       } else {
         say('seed-child masih jalan — biarin.');
       }
@@ -96,4 +98,27 @@ function spawnSeed() {
   process.stdout.write((r.stdout || '') + (r.stderr || ''));
   const bal = await p.getBalance(trig);
   say(`saldo pemicu sekarang: ${ethers.formatEther(bal)} ETH — line bakal lift + sell otomatis.`);
+
+  // === buntut: tunggu #60 settle = lap 2 tuntas → langsung start LAP 3 ===
+  say('buntut: nunggu #60 settle, trus auto-start LAP 3...');
+  const deadline = Date.now() + 75 * 60 * 1000;
+  for (;;) {
+    await sleep(60000);
+    let st2 = null;
+    try { st2 = readJson(path.join(A, 'line_state2.json')); } catch (e) {}
+    if (st2) {
+      const m60 = (st2.missions || []).find((x) => x.n === 60);
+      say(`buntut: #60 fase ${m60 ? m60.phase : '?'} | lap2 status ${st2.status}`);
+      if (st2.status === 'done') {
+        if (!fs.existsSync(path.join(A, 'line_state3.json'))) {
+          say('🏁 LAP 2 TUNTAS — start LAP 3 otomatis!');
+          fs.writeFileSync(path.join(A, 'LAP3_READY'), 'auto-start oleh fix60-timer');
+          const out = fs.openSync(path.join(ROOT, 'logs/line3.log'), 'a');
+          spawn('node', ['scripts/factory-line.js', '--run', '--lap3'], { cwd: ROOT, detached: true, stdio: ['ignore', out, out] }).unref();
+        }
+        return;
+      }
+    }
+    if (Date.now() > deadline) { say('buntut: deadline 75 mnt — keluar (watchdog bakal start LAP 3-nya).'); return; }
+  }
 })().catch((e) => { console.error('FATAL', e.message); process.exit(1); });

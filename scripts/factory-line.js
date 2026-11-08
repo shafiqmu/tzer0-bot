@@ -19,12 +19,13 @@ const A = path.join(ROOT, 'analysis');
 const argv = process.argv.slice(2);
 const RUN = argv.includes('--run');
 const DRY = argv.includes('--dry');
-const LAP2 = argv.includes('--lap2');   // puteran ke-2: shuffle SEMUA 1000 wallet, mN mulai 36, nama mission baru
+const LAP = argv.includes('--lap4') ? 4 : argv.includes('--lap3') ? 3 : argv.includes('--lap2') ? 2 : 1; // puteran: shuffle+nama beda tiap lap, mN lanjut
+const LAP2 = LAP === 2; // mode lap-2 (dipertahankan buat kompat)
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0102;        // beli Fase A (≥0.01)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
-const MAX_QUEUE = 6;         // maks mission "aged" nunggu umur bareng (frozen capital ≥ queue×0.28 ETH)
+const MAX_QUEUE = LAP >= 3 ? 8 : 6; // maks mission "aged" nunggu bareng (frozen capital ≥ queue×0.28 ETH; lap 3+ kas lebih gede)
 const MAX_TRIG = 3;          // TURBO: pemicu paralel (tiap mission wallet beda — aman)
 const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
@@ -52,7 +53,10 @@ const NAMES2 = [
   ['Hazel Engine', 'HZEN'], ['Orbit Fields', 'ORFD'], ['Solstice Works', 'SLWK'], ['Bramble Line', 'BRML'],
 ];
 const NAMESEL = LAP2 ? NAMES2 : NAMES;
-const LINE_STATE = path.join(A, LAP2 ? 'line_state2.json' : 'line_state.json');
+const FIRSTS = [...new Set(NAMES2.map((n) => n[0].split(' ')[0]))];
+const SECONDS = [...new Set(NAMES2.map((n) => n[0].split(' ').slice(-1)[0]))];
+const genName = (wi, lap) => { const f = FIRSTS[(wi + lap * 7) % FIRSTS.length]; const s = SECONDS[(wi * 5 + lap * 11) % SECONDS.length]; return [f + ' ' + s, (f.slice(0, 2) + s.slice(0, 2)).toUpperCase()]; };
+const LINE_STATE = path.join(A, LAP > 1 ? `line_state${LAP}.json` : 'line_state.json');
 const PILOT_STATE = path.join(A, 'factory_state.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,10 +76,10 @@ function buildWindows() {
   const pilotPlan = JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8')).map((x) => x.addr);
   const pilotSet = new Set(pilotPlan.map((x) => x.toLowerCase()));
   let rest; let seed;
-  if (LAP2) {
-    // LAP 2: shuffle SEMUA 1000 wallet (wallets_full udah termasuk 36 pilot) — grup + peran beda dari lap 1
+  if (LAP > 1) {
+    // LAP 2+: shuffle SEMUA 1000 wallet (wallets_full udah termasuk 36 pilot) — grup + peran beda tiap puteran
     rest = [...wallets];
-    seed = 777;
+    seed = LAP === 2 ? 777 : 776 + LAP; // lap2=777, lap3=779, lap4=780 — tiap lap beda urutan
     for (let j = rest.length - 1; j > 0; j--) {
       seed = (seed * 1103515245 + 12345) % 2147483648;
       const k = seed % (j + 1);
@@ -100,7 +104,7 @@ const spawnDetached = (args, logFile) => {
 
 (async () => {
   const wins = buildWindows();
-  if (DRY) { say(`DRY${LAP2 ? ' LAP2' : ''}: ${wins.length} window | ${wins.map((w) => w.length).join(',')} | total ${wins.reduce((a, w) => a + w.length, 0)}`); return; }
+  if (DRY) { say(`DRY${LAP > 1 ? ' LAP ' + LAP : ''}: ${wins.length} window | ${wins.map((w) => w.length).join(',')} | total ${wins.reduce((a, w) => a + w.length, 0)}`); return; }
   if (!RUN) { say('butuh --run'); return; }
   const st = loadLine();
   // migrasi nama fase v2 → v3 (seeded→aged, burst→trigger) + restart-safe (seeding/stuck diulang)
@@ -109,8 +113,9 @@ const spawnDetached = (args, logFile) => {
   if (bad.length) { st.missions = st.missions.filter((m) => m.phase !== 'seeding' && m.phase !== 'stuck'); st.nextWindow = Math.max(0, st.nextWindow - bad.length); saveLine(st); }
 
   // === FASE 0: tunggu pilot LIFTED + auto-resume pilot kalau mati ===
+  if (LAP >= 3 && st.status === 'waiting-pilot') { st.status = 'running'; saveLine(st); say(`LAP ${LAP}: skip nunggu pilot — langsung produksi.`); }
   if (st.status === 'waiting-pilot') {
-    say(`JALUR v3.2${LAP2 ? ' LAP2' : ''} start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
+    say(`JALUR v3.2${LAP > 1 ? ' LAP ' + LAP : ''} start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
     for (;;) {
       if (fs.existsSync(path.join(A, 'STOP'))) { st.status = 'stopped'; saveLine(st); say('STOP — keluar.'); return; }
       const ps = readJson(PILOT_STATE);
@@ -181,7 +186,7 @@ const spawnDetached = (args, logFile) => {
     if (!seeding && queue < MAX_QUEUE && st.nextWindow < wins.length) {
       const wi = st.nextWindow;
       const chunk = wins[wi];
-      const mN = wi + 2 + (LAP2 ? 34 : 0);
+      const mN = wi + { 1: 2, 2: 36, 3: 71, 4: 107 }[LAP];
       const creator = chunk[0];
       const backers = chunk.slice(1);
       const aCount = Math.min(MAXA, Math.max(1, backers.length - 1));
@@ -190,7 +195,7 @@ const spawnDetached = (args, logFile) => {
       const skipped = backers.slice(aCount, backers.length - 1);
       const gap = Math.max(0.001, LIFT_NET - aCount * A_BUY * 0.99);
       const trigWant = gap * 1.12 / 0.99 + 0.0015;
-      const [name, ticker] = NAMESEL[wi % NAMESEL.length];
+      const [name, ticker] = LAP >= 3 ? genName(wi, LAP) : NAMESEL[wi % NAMESEL.length];
       const planFile = `analysis/line_m${mN}_plan.json`;
       const fundFile = `analysis/line_m${mN}_fund.json`;
       const stateFile = `analysis/factory_m${mN}_state.json`;
@@ -242,7 +247,7 @@ const spawnDetached = (args, logFile) => {
     if (st.nextWindow >= wins.length && !active) {
       st.status = 'done'; saveLine(st);
       const pts = st.missions.reduce((a, m) => a + (Number(m.points) || 0), 0);
-      say(`=== JALUR v3.2${LAP2 ? ' LAP2' : ''} SELESAI: ${st.missions.length} mission | poin ≈ ${pts} ===`);
+      say(`=== JALUR v3.2${LAP > 1 ? ' LAP ' + LAP : ''} SELESAI: ${st.missions.length} mission | poin ≈ ${pts} ===`);
       return;
     }
     // -- deteksi macet --

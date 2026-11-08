@@ -8,9 +8,11 @@ const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(A, f), '
 const AGE = 61 * 60000;
 
 const pilot = read('factory_state.json');
+const line4 = read('line_state4.json');
+const line3 = read('line_state3.json');
 const line2 = read('line_state2.json');
-const line = line2 || read('line_state.json');
-const LAP = line2 ? 2 : 1;
+const line = line4 || line3 || line2 || read('line_state.json');
+const LAP = line4 ? 4 : line3 ? 3 : line2 ? 2 : 1;
 const out = [];
 
 const pilotName = (pilot && pilot.name) || 'Nimbus Foundry';
