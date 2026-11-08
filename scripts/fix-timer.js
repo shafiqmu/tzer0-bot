@@ -35,7 +35,7 @@ const s3 = readJson(path.join(A, 'line_state3.json'));
 const mentry = (s3.missions || []).find((x) => x.n === N) || {};
 const NAME = mentry.name || `M${N}`;
 const TICKER = mentry.ticker || `M${N}`;
-const plan0 = readJson(path.join(A, planF));
+const plan0 = readJson(path.join(ROOT, planF));
 const backers = plan0.filter((x) => x.role === 'backer').map((x) => x.addr);
 const trig = backers[backers.length - 1];
 
