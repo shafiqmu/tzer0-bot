@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// factory-line.js v3.1 — JALUR "FASE A + PEMICU" (crew penuh) + MODE LAP 2:
-//   Tiap mission: fund → create + FASE A (27 backer beli, umur 60-mnt jalan paralel) → [aged 61 mnt]
-//   → PEMICU (backer terakhir isi sisa kurva → LIFTOFF; cek `graduated` dulu — bot completer luar sering nyamber duluan)
-//   → semua backer jual (pas umurnya) → wallet pemicu dijual telat (61 mnt) oleh sweeper → verify.
-//   Pemicu jalan SATU-SATU. Kill-switch: analysis/STOP (exit), analysis/HOLD (pause).
+// factory-line.js v3.2 — JALUR "FASE A + PEMICU" + MODE TURBO:
+//   - PEMICU PARALEL ×MAX_TRIG (wallet beda mission — aman; dulu satu-satu = rem utama)
+//   - SEED ASYNC (produksi gak ngeblok antrian pemicu)
+//   - Queue 6 (frozen capital ≥ queue×0.28 ETH)
+//   - Sell + beli fase A PARALEL (dikerjakan di factory-mission.js v3.2)
+//   Alur tiap mission: fund → create + FASE A → [aged 61 mnt] → PEMICU → jual → settle.
+//   Kill-switch: analysis/STOP (exit), analysis/HOLD (pause).
 //   State: analysis/line_state.json (lap 1) / analysis/line_state2.json (--lap2).
 // Usage: node scripts/factory-line.js --run [--dry] [--lap2]
 'use strict';
@@ -22,7 +24,8 @@ const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0102;        // beli Fase A (≥0.01)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
-const MAX_QUEUE = 5;         // maks mission "aged" nunggu umur bareng (frozen capital ≥ queue×0.36 ETH)
+const MAX_QUEUE = 6;         // maks mission "aged" nunggu umur bareng (frozen capital ≥ queue×0.28 ETH)
+const MAX_TRIG = 3;          // TURBO: pemicu paralel (tiap mission wallet beda — aman)
 const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
   ['Cinder Relay', 'CNDR'], ['Harbor Nine', 'HRB9'], ['Vela Works', 'VELA'], ['Kite & Ember', 'KITE'],
@@ -107,7 +110,7 @@ const spawnDetached = (args, logFile) => {
 
   // === FASE 0: tunggu pilot LIFTED + auto-resume pilot kalau mati ===
   if (st.status === 'waiting-pilot') {
-    say(`JALUR v3${LAP2 ? ' LAP2' : ''} start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
+    say(`JALUR v3.2${LAP2 ? ' LAP2' : ''} start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
     for (;;) {
       if (fs.existsSync(path.join(A, 'STOP'))) { st.status = 'stopped'; saveLine(st); say('STOP — keluar.'); return; }
       const ps = readJson(PILOT_STATE);
@@ -150,7 +153,7 @@ const spawnDetached = (args, logFile) => {
           }
           saveLine(st);
           say(`#${m.n} (${m.name}) FASE A ✅ → aged`);
-        } else if (Date.now() - (m.createdTs || 0) > 4 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
+        } else if (Date.now() - (m.createdTs || 0) > 3 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
           say(`⚠️ #${m.n} seed-child mati di step ${ms ? ms.step : '?'} — resume...`);
           spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
         }
@@ -162,18 +165,17 @@ const spawnDetached = (args, logFile) => {
       }
     }
 
-    // -- B: PEMICU mission paling tua yang umurnya udah 61+ mnt (satu-satu) --
-    const triggering = st.missions.some((m) => m.phase === 'trigger');
-    if (!triggering) {
+    // -- B: PEMICU mission paling tua yang umurnya udah 61+ mnt (TURBO: maks MAX_TRIG paralel) --
+    let trigCount = st.missions.filter((m) => m.phase === 'trigger').length;
+    while (trigCount < MAX_TRIG) {
       const cand = st.missions.find((m) => m.phase === 'aged' && Date.now() - m.seededTs >= AGE_MS);
-      if (cand) {
-        cand.phase = 'trigger'; cand.triggerTs = Date.now(); saveLine(st);
-        say(`PEMICU #${cand.n} (${cand.name}) — umur ${((Date.now() - cand.seededTs) / 60000).toFixed(1)} mnt, sisa kurva disamber 🚀`);
-        spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', cand.planFile, '--state', cand.stateFile, '--log', cand.logFile, '--name', cand.name, '--ticker', cand.ticker], cand.logFile);
-      }
+      if (!cand) break;
+      cand.phase = 'trigger'; cand.triggerTs = Date.now(); saveLine(st); trigCount++;
+      say(`PEMICU #${cand.n} (${cand.name}) — umur ${((Date.now() - cand.seededTs) / 60000).toFixed(1)} mnt, sisa kurva disamber 🚀 (paralel ${trigCount}/${MAX_TRIG})`);
+      spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', cand.planFile, '--state', cand.stateFile, '--log', cand.logFile, '--name', cand.name, '--ticker', cand.ticker], cand.logFile);
     }
 
-    // -- A: PRODUKSI mission berikutnya (fund → create + FASE A) kalau antrian belum penuh --
+    // -- A: PRODUKSI mission berikutnya (fund → create + FASE A, seed ASYNC — antrian gak ke-blok) --
     const seeding = st.missions.some((m) => m.phase === 'seeding');
     const queue = st.missions.filter((m) => m.phase === 'aged').length;
     if (!seeding && queue < MAX_QUEUE && st.nextWindow < wins.length) {
@@ -217,7 +219,7 @@ const spawnDetached = (args, logFile) => {
 
       say(`funding #${mN}...`);
       let funded = false;
-      for (let tr = 1; tr <= 10 && !funded; tr++) {
+      for (let tr = 1; tr <= 8 && !funded; tr++) {
         const fr = spawnSync('node', ['scripts/consolidate.js', '--plan', fundFile, '--run', '--exclude', exclFile], { cwd: ROOT, encoding: 'utf8', timeout: 1800000 });
         const fOut = (fr.stdout || '') + (fr.stderr || '');
         process.stdout.write(fOut);
@@ -226,24 +228,13 @@ const spawnDetached = (args, logFile) => {
         const gm = /SELESAI: (\d+) ok \| (\d+) gagal/.exec(fOut);
         const gFail = gm ? Number(gm[2]) : 0;
         if (shortTotal <= 0.004 && gFail === 0) funded = true;
-        else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH / ${gFail} tx gagal — tunggu 75s (duit dari jualan balik)... [${tr}/10]`); await sleep(75000); }
+        else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH / ${gFail} tx gagal — tunggu 60s (duit dari jualan balik)... [${tr}/8]`); await sleep(60000); }
       }
       if (!funded) say(`⚠️ funding #${mN} pas-pasan — lanjut.`);
-      await sleep(4000);
-      say(`create + FASE A #${mN}...`);
-      spawnSync('node', ['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', planFile, '--state', stateFile, '--log', logFile, '--name', name, '--ticker', ticker], { cwd: ROOT, stdio: 'inherit', timeout: 1800000 });
-      const ms2 = readJson(path.join(ROOT, stateFile));
-      if (ms2 && ['aged', 'trigger', 'sell'].includes(ms2.step)) {
-        const ts = Math.max(...Object.values(ms2.buys || {}).map((x) => x.ts || 0), Date.now() - 1000);
-        m.phase = 'aged'; m.seededTs = ts; m.mission = ms2.mission; saveLine(st);
-        say(`#${mN} FASE A ✅ (umur jalan) | mission ${ms2.mission}`);
-      } else {
-        m.phase = 'stuck'; saveLine(st);
-        say(`⚠️ #${mN} seed gagal (step ${ms2 ? ms2.step : '?'}) — jalur pause.`);
-        fs.writeFileSync(path.join(A, 'LINE_STUCK'), String(mN));
-        st.status = 'stuck'; saveLine(st);
-        return;
-      }
+      await sleep(2000);
+      say(`create + FASE A #${mN} (ASYNC — antrian pemicu jalan terus)...`);
+      spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', planFile, '--state', stateFile, '--log', logFile, '--name', name, '--ticker', ticker], logFile);
+      // fase 'seeding' dipromosikan ke 'aged' oleh blok sync di tick berikutnya (produksi berikutnya nunggu ini kelar)
     }
 
     // -- selesai semua? --
@@ -251,7 +242,7 @@ const spawnDetached = (args, logFile) => {
     if (st.nextWindow >= wins.length && !active) {
       st.status = 'done'; saveLine(st);
       const pts = st.missions.reduce((a, m) => a + (Number(m.points) || 0), 0);
-      say(`=== JALUR v3${LAP2 ? ' LAP2' : ''} SELESAI: ${st.missions.length} mission | poin ≈ ${pts} ===`);
+      say(`=== JALUR v3.2${LAP2 ? ' LAP2' : ''} SELESAI: ${st.missions.length} mission | poin ≈ ${pts} ===`);
       return;
     }
     // -- deteksi macet --

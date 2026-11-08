@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-// factory-mission.js v3 — JALUR "FASE A + PEMICU" (crew penuh untuk semua backer):
+// factory-mission.js v3.2 — JALUR "FASE A + PEMICU" + MODE TURBO:
+//  - FASE A: beli PARALEL 4-4 wallet (nonce aman, wallet beda) → seed ~2-3 mnt (dulu 5-7)
+//  - SELL: jual PARALEL 6-6 wallet → sell ~2-3 mnt (dulu 7-12)
+//  - TRIGGER: cek `graduated` dulu (bot completer sering nyamber duluan — jangan beli sia-sia)
 //
 //  Kenapa: crew butuh "beli ≥0.01 + tahan 60 mnt + masih pegang PAS liftoff".
-//  Kalau backer beli detik2 terakhir sebelum lift (desain lama), dia bisa kehilangan crew.
-//  Solusi: SEMUA backer (27) beli DULUAN (fase A) → umur 60+ mnt jalan → baru kurva
-//  diselesaikan oleh SATU wallet pemicu (backer terakhir) → liftoff. Semua backer fase A
-//  dijamin: beli ≥0.01 ✓, tahan 61+ mnt pas lift ✓, masih pegang pas lift ✓.
-//
-//  Matematika kurva (kalibrasi on-chain): butuh 0.28335 ETH NET (setelah fee) buat liftoff.
-//  Fase A: 27 backer × ~0.0102 = ~0.2726 net (96%) → sisa ~0.0108 net diisi pemicu (dinamis, ada refund).
+//  SEMUA backer (27) beli DULUAN (fase A) → umur 60+ mnt jalan → baru kurva
+//  diselesaikan oleh SATU wallet pemicu (backer terakhir) → liftoff.
 //
 //  Fase:
 //   --phase seed    : create + isi FASE A → step 'aged' (umur jalan di background)
@@ -19,7 +17,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawnSync, spawn } = require('child_process');
 const { ethers } = require('ethers');
 
 const ROOT = path.join(__dirname, '..');
@@ -37,6 +35,8 @@ const A_BUY = Number(arg('--buyeth', '0.0102')); // ukuran beli Fase A (≥0.01 
 const MAXA = 27; // maks wallet fase A (27 × 0.0102 = 0.2754 gross ≈ 96% kurva)
 const LIFT_NET = 0.28335; // ETH NET buat liftoff (kalibrasi on-chain dari kurva)
 const HOLD_MS = 61 * 60000;
+const BUY_PAR = 4;  // FASE A beli paralel
+const SELL_PAR = 6; // jual paralel
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const LAUNCHPAD = '0xbce48917C41BB45Ad15f859E4Bf0e4EEa74bAd5c';
 
@@ -79,7 +79,7 @@ function loadBareKeys(file) {
   const phaseAList = backers.slice(0, Math.min(MAXA, Math.max(1, backers.length - 1)));
   const triggerAddr = backers[backers.length - 1];
 
-  log(`=== FACTORY v3 [${PHASE}] ${NAME} (${TICKER}) | backer ${backers.length} | faseA ${phaseAList.length}×~${A_BUY} | pemicu ${triggerAddr.slice(0, 10)} | step ${st.step} | ${RUN ? 'LIVE' : 'DRY'} ===`);
+  log(`=== FACTORY v3.2 [${PHASE}] ${NAME} (${TICKER}) | backer ${backers.length} | faseA ${phaseAList.length}×~${A_BUY} | pemicu ${triggerAddr.slice(0, 10)} | step ${st.step} | ${RUN ? 'LIVE' : 'DRY'} ===`);
   if (!RUN) { log('dry'); return; }
 
   // STEP: CREATE
@@ -97,31 +97,38 @@ function loadBareKeys(file) {
     log(`CREATE OK ✅ mission: ${st.mission}`);
   }
 
-  // STEP: FASE A — backer beli duluan (jeda 5-12s biar gak seragam)
+  // STEP: FASE A — backer beli duluan (PARALEL 4-4, jeda kecil biar gak seragam)
   if (st.step === 'phaseA') {
-    let done = 0;
-    for (const b of phaseAList) {
-      if (st.buys[b]) { done++; continue; }
+    let done = phaseAList.filter((b) => st.buys[b]).length;
+    const todo = phaseAList.filter((b) => !st.buys[b]);
+    const buyOne = async (b) => {
       const w = walletOf(b);
-      let ok = false;
-      for (let t = 1; t <= 3 && !ok; t++) {
+      for (let t = 1; t <= 3; t++) {
         try {
           const tx = await lp.connect(w).buy(st.mission, 0, { value: jitterA(), gasLimit: 3000000n });
           await tx.wait();
           st.buys[b] = { kind: 'phaseA', ts: Date.now(), tx: tx.hash }; save();
-          ok = true; done++;
+          done++;
           log(`FASE A ${done}/${phaseAList.length} ✅ ${b.slice(0, 10)} | tx ${tx.hash.slice(0, 18)}`);
+          return true;
         } catch (e) {
           const msg = String(e.shortMessage || e.message).slice(0, 80);
-          if (/graduated|LIFT/i.test(msg)) { log('FASE A: kurva udah lift duluan — stop.'); break; }
+          if (/graduated|LIFT/i.test(msg)) { log('FASE A: kurva udah lift duluan — stop.'); return 'lift'; }
           log(`FASE A ${b.slice(0, 10)} try ${t} ✗ ${msg}`);
-          await sleep(6000);
+          await sleep(4000);
         }
       }
-      await sleep(5000 + Math.random() * 7000);
+      return false;
+    };
+    let stopLift = false;
+    for (let i = 0; i < todo.length; i += BUY_PAR) {
+      const batch = todo.slice(i, i + BUY_PAR);
+      const res = await Promise.all(batch.map((b) => buyOne(b)));
+      if (res.includes('lift')) { stopLift = true; break; }
+      await sleep(2000 + Math.random() * 3500);
     }
     st.step = 'aged'; save();
-    log(`FASE A SELESAI (${done}/${phaseAList.length}) → AGED ✅ (umur jalan dari beli terakhir)`);
+    log(`FASE A SELESAI (${done}/${phaseAList.length})${stopLift ? ' [kurva lift duluan]' : ''} → AGED ✅ (umur jalan dari beli terakhir)`);
   }
 
   if (st.step === 'aged' && PHASE === 'seed') { log('AGED ✅ (fase seed stop di sini)'); return; }
@@ -145,13 +152,13 @@ function loadBareKeys(file) {
         const tx = await lp.connect(w).buy(st.mission, 0, { value, gasLimit: 3000000n });
         await tx.wait();
         st.buys[triggerAddr] = { kind: 'trigger', ts: Date.now(), tx: tx.hash }; save();
-        await sleep(4000);
+        await sleep(3000);
         const bps = Number(await prog.progressBps(st.mission));
         log(`PEMICU ✅ bps ${bps}${bps >= 10000 ? ' — LIFTOFF! 🚀' : ''}`);
         if (bps >= 10000) { lifted = true; break; }
       } catch (e) {
         log(`PEMICU ✗ ${String(e.shortMessage || e.message).slice(0, 90)}`);
-        await sleep(6000);
+        await sleep(4000);
       }
     }
     if (!lifted) {
@@ -170,6 +177,7 @@ function loadBareKeys(file) {
   }
 
   // STEP: SELL — tunggu lift dulu (jangan jual sebelum liftoff = crew kebakar), lalu tiap backer jual pas umurnya ≥61 mnt
+  //           MODE TURBO: jual PARALEL 6-6 (wallet beda — nonce aman)
   if (st.step === 'sell') {
     let lifted = false;
     for (let i = 0; i < 40; i++) {
@@ -179,20 +187,29 @@ function loadBareKeys(file) {
     if (!lifted) { log('⚠️ belum lift — tunda jual (biar crew gak kebakar).'); return; }
     const buyers = Object.keys(st.buys).filter((b) => st.buys[b].kind !== 'trigger').sort((a, b) => st.buys[a].ts - st.buys[b].ts);
     let ok = 0, fail = 0;
-    for (const b of buyers) {
-      if (st.sells[b]) continue;
-      const due = st.buys[b].ts + HOLD_MS;
-      const wait = due - Date.now();
-      if (wait > 0) { log(`nunggu umur ${b.slice(0, 10)} ${(wait / 60000).toFixed(1)} mnt...`); await sleep(wait); }
-      const r = spawnSync('node', ['scripts/sell-token.js', '--wallet', b, '--mission', st.mission, '--run'], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
-      const out = (r.stdout || '') + (r.stderr || '');
-      if (/DONE ✅/.test(out)) {
-        const m = out.match(/quote ≈ ([\d.]+) ETH/) || out.match(/WETH diterima: ([\d.]+)/);
-        st.sells[b] = { ts: Date.now(), gain: m ? m[1] : '0' }; ok++;
-        log(`SELL ✅ ${b.slice(0, 10)} +${m ? m[1] : '?'} ETH`);
-      } else { fail++; log(`SELL ✗ ${b.slice(0, 10)} ${out.trim().split('\n').slice(-1)[0].slice(0, 80)}`); }
+    const pending = buyers.filter((b) => !st.sells[b]);
+    const sellOne = (b) => new Promise((resolve) => {
+      const c = spawn('node', ['scripts/sell-token.js', '--wallet', b, '--mission', st.mission, '--run'], { cwd: ROOT });
+      let out = '';
+      c.stdout.on('data', (d) => (out += d));
+      c.stderr.on('data', (d) => (out += d));
+      c.on('close', () => resolve(out));
+    });
+    for (let i = 0; i < pending.length; i += SELL_PAR) {
+      const batch = pending.slice(i, i + SELL_PAR);
+      await Promise.all(batch.map(async (b) => {
+        const due = st.buys[b].ts + HOLD_MS;
+        const wait = due - Date.now();
+        if (wait > 0) { log(`nunggu umur ${b.slice(0, 10)} ${(wait / 60000).toFixed(1)} mnt...`); await sleep(wait); }
+        const out = await sellOne(b);
+        if (/DONE ✅/.test(out)) {
+          const m = out.match(/quote ≈ ([\d.]+) ETH/) || out.match(/WETH diterima: ([\d.]+)/);
+          st.sells[b] = { ts: Date.now(), gain: m ? m[1] : '0' }; ok++;
+          log(`SELL ✅ ${b.slice(0, 10)} +${m ? m[1] : '?'} ETH`);
+        } else { fail++; log(`SELL ✗ ${b.slice(0, 10)} ${out.trim().split('\n').slice(-1)[0].slice(0, 80)}`); }
+      }));
       save();
-      await sleep(2500 + Math.random() * 2500);
+      await sleep(1000 + Math.random() * 1500);
     }
     log(`SELLS: ${ok} ok | ${fail} gagal`);
     st.step = 'verify'; save();
