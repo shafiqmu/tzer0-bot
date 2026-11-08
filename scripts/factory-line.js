@@ -25,8 +25,8 @@ const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0102;        // beli Fase A (≥0.01)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
-const MAX_QUEUE = LAP >= 3 ? 8 : 6; // maks mission "aged" nunggu bareng (frozen capital ≥ queue×0.28 ETH; lap 3+ kas lebih gede)
-const MAX_TRIG = 3;          // TURBO: pemicu paralel (tiap mission wallet beda — aman)
+const MAX_QUEUE = LAP >= 3 ? 5 : 6; // maks mission "aged" nunggu bareng (lap 3+: 5 — kas ketat, antrian lama harus kelar dulu)
+const MAX_TRIG = 5;          // TURBO: pemicu paralel ×5 (wallet beda — aman; 3→5 biar antrian gak nyumbat)
 const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
   ['Cinder Relay', 'CNDR'], ['Harbor Nine', 'HRB9'], ['Vela Works', 'VELA'], ['Kite & Ember', 'KITE'],
@@ -235,7 +235,14 @@ const spawnDetached = (args, logFile) => {
         if (shortTotal <= 0.004 && gFail === 0) funded = true;
         else { say(`funding #${mN} kurang ${shortTotal.toFixed(4)} ETH / ${gFail} tx gagal — tunggu 60s (duit dari jualan balik)... [${tr}/8]`); await sleep(60000); }
       }
-      if (!funded) say(`⚠️ funding #${mN} pas-pasan — lanjut.`);
+      if (!funded) {
+        say(`⚠️ funding #${mN} GAGAL (kas kering) — produksi DIBATALKAN, coba lagi tick depan.`);
+        st.missions = st.missions.filter((x) => x.n !== mN);
+        st.nextWindow--;
+        saveLine(st);
+        await sleep(30000);
+        continue;
+      }
       await sleep(2000);
       say(`create + FASE A #${mN} (ASYNC — antrian pemicu jalan terus)...`);
       spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', planFile, '--state', stateFile, '--log', logFile, '--name', name, '--ticker', ticker], logFile);
