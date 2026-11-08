@@ -46,7 +46,12 @@ if (!line) {
     const last = settled[settled.length - 1];
     if (last) out.push(`↩️ Terakhir kelar: ${last.name} (${last.ticker})${last.points ? ' → poin ' + Number(last.points).toLocaleString('id-ID') : ''}`);
   } else if (line.status === 'done') {
-    out.push(`🏆 PABRIK KELAR SEMUA! ${doneCount} mission · poin total ≈ ${totalPts.toLocaleString('id-ID')}`);
+    // estimasi on-chain: crew 150/beli + liftoff 500/creator + fuel ±10/beli
+    let buys = 0;
+    for (const m of missions) { try { const ms = read(('' + m.stateFile).split('/').pop()); if (ms && ms.buys) buys += Object.keys(ms.buys).length; } catch (e) {} }
+    try { const pil = read('factory_state.json'); if (pil && pil.buys) buys += Object.keys(pil.buys).length; } catch (e) {}
+    const est = buys * 150 + (doneCount) * 500 + Math.round(buys * 10);
+    out.push(`🏆 PABRIK KELAR SEMUA! ${doneCount} mission · estimasi ±${est.toLocaleString('id-ID')} poin (on-chain; server poin mereka masih ngadat)`);
   } else if (line.status === 'stuck') {
     out.push('⚠️ Jalur macet — perlu dicek (state aman, bisa lanjut). Cek logs/line.log');
   } else if (line.status === 'stopped') {

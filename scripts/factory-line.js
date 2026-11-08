@@ -20,7 +20,7 @@ const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0102;        // beli Fase A (≥0.01)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
-const MAX_QUEUE = 8;         // maks mission "aged" nunggu umur bareng
+const MAX_QUEUE = 5;         // maks mission "aged" nunggu umur bareng (frozen capital ≥ queue×0.36 ETH)
 const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
   ['Cinder Relay', 'CNDR'], ['Harbor Nine', 'HRB9'], ['Vela Works', 'VELA'], ['Kite & Ember', 'KITE'],
