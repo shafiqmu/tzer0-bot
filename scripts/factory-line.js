@@ -140,7 +140,7 @@ const spawnDetached = (args, logFile) => {
           m.triggerAddr = ms.triggerAddr; m.triggerTs = ms.triggerTs; m.settledTs = Date.now();
           saveLine(st);
           say(`MISSION #${m.n} (${m.name}) SELESAI ✅ poin ≈ ${ms.totalPoints}`);
-        } else if (Date.now() - (m.triggerTs || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
+        } else if (Date.now() - (m.triggerTs || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_stat[e]`)) {
           say(`⚠️ #${m.n} pemicu mati di step ${ms ? ms.step : '?'} — resume...`);
           spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
         }
@@ -153,7 +153,7 @@ const spawnDetached = (args, logFile) => {
           }
           saveLine(st);
           say(`#${m.n} (${m.name}) FASE A ✅ → aged`);
-        } else if (Date.now() - (m.createdTs || 0) > 3 * 60000 && !hasProc(`factory_m${m.n}_state`)) {
+        } else if (Date.now() - (m.createdTs || 0) > 3 * 60000 && !hasProc(`factory_m${m.n}_stat[e]`)) {
           say(`⚠️ #${m.n} seed-child mati di step ${ms ? ms.step : '?'} — resume...`);
           spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'seed', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
         }

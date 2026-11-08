@@ -144,7 +144,7 @@ function loadBareKeys(file) {
       const c = await lp.curve(st.mission);
       if (c.graduated) { lifted = true; log('PEMICU: kurva UDAH lift (bot completer nyamber duluan) — langsung jual.'); break; }
       const gapWei = BigInt(Math.round(LIFT_NET * 1e18)) - c.realNative;
-      if (gapWei <= 400000000000000n) break; // praktis penuh — cek graduated di bawah
+      if (gapWei <= 0n) break; // udah penuh — cek graduated di bawah (gap mini pun dibeli: floor 0.0007 + refund)
       let value = (gapWei * 109n) / 99n; // net / 0.99 + margin
       if (value < 700000000000000n) value = 700000000000000n;
       try {
