@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// factory-line.js v3 — JALUR "FASE A + PEMICU" (crew penuh):
-//   Tiap mission: fund → create + FASE A (27 backer beli, umur 60-mntjalan paralel) → [aged 61 mnt]
-//   → PEMICU (backer terakhir isi sisa kurva → LIFTOFF; backer fase A udah umur 61+ & masih pegang → crew penuh)
+// factory-line.js v3.1 — JALUR "FASE A + PEMICU" (crew penuh) + MODE LAP 2:
+//   Tiap mission: fund → create + FASE A (27 backer beli, umur 60-mnt jalan paralel) → [aged 61 mnt]
+//   → PEMICU (backer terakhir isi sisa kurva → LIFTOFF; cek `graduated` dulu — bot completer luar sering nyamber duluan)
 //   → semua backer jual (pas umurnya) → wallet pemicu dijual telat (61 mnt) oleh sweeper → verify.
-//   Pemicu jalan SATU-SATU. Kill-switch: analysis/STOP (exit), analysis/HOLD (pause). State: analysis/line_state.json.
-// Usage: node scripts/factory-line.js --run [--dry]
+//   Pemicu jalan SATU-SATU. Kill-switch: analysis/STOP (exit), analysis/HOLD (pause).
+//   State: analysis/line_state.json (lap 1) / analysis/line_state2.json (--lap2).
+// Usage: node scripts/factory-line.js --run [--dry] [--lap2]
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +17,7 @@ const A = path.join(ROOT, 'analysis');
 const argv = process.argv.slice(2);
 const RUN = argv.includes('--run');
 const DRY = argv.includes('--dry');
+const LAP2 = argv.includes('--lap2');   // puteran ke-2: shuffle SEMUA 1000 wallet, mN mulai 36, nama mission baru
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0102;        // beli Fase A (≥0.01)
 const MAXA = 27;             // maks wallet fase A
@@ -34,7 +36,20 @@ const NAMES = [
   ['Signal Ridge', 'SRDG'], ['Arc & Ember', 'ARCE'], ['Tidal Ledger', 'TDGR'], ['Polar Foundry', 'PLFD'],
   ['Hollow Vale', 'HLVE'], ['Rivet & Row', 'RVTR'], ['Fallow Bay', 'FLWB'], ['Noon Anchor', 'NNAN'],
 ];
-const LINE_STATE = path.join(A, 'line_state.json');
+const NAMES2 = [
+  ['Ochre Summit', 'OCSM'], ['Velvet Quarry', 'VLQR'], ['Salt Meadow', 'SLMD'], ['Blue Kiln', 'BLKL'],
+  ['Mercury Tide', 'MCYT'], ['Old Station', 'OLST'], ['Ferro Grove', 'FRGR'], ['Tin Lantern', 'TNLT'],
+  ['Misty Wharf', 'MSWH'], ['Bronze Echo', 'BRZE'], ['Gemini Rocks', 'GMRO'], ['Silver Meadow', 'SVMD'],
+  ['Ash Compass', 'ASCO'], ['Coral Engine', 'CREN'], ['Dust Harbor', 'DSHB'], ['Lunar Depot', 'LNDP'],
+  ['Velvet Anvil', 'VLAN'], ['Summit Line', 'SMLN'], ['Willow Reactor', 'WLRX'], ['Onyx Signal', 'ONSG'],
+  ['Copper Delta', 'CPDL'], ['Jute & Steel', 'JTST'], ['Iron Orchard', 'IROR'], ['Slow Harbor', 'SLHB'],
+  ['Pale Trek', 'PLTK'], ['Nova Basket', 'NVBK'], ['Echo Bastion', 'ECBS'], ['Drift Beacon', 'DRBC'],
+  ['Quiet Reactor', 'QTRX'], ['Amber Monsoon', 'AMMN'], ['Static Pier', 'STPR'], ['Glass Foundry', 'GLFD'],
+  ['River Antenna', 'RVAN'], ['Meadow Circuit', 'MDCR'], ['Cobalt Fields', 'CBFD'], ['Rust & Radar', 'RSRD'],
+  ['Hazel Engine', 'HZEN'], ['Orbit Fields', 'ORFD'], ['Solstice Works', 'SLWK'], ['Bramble Line', 'BRML'],
+];
+const NAMESEL = LAP2 ? NAMES2 : NAMES;
+const LINE_STATE = path.join(A, LAP2 ? 'line_state2.json' : 'line_state.json');
 const PILOT_STATE = path.join(A, 'factory_state.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,10 +66,24 @@ function saveLine(st) { st.updatedAt = Date.now(); fs.writeFileSync(LINE_STATE, 
 
 function buildWindows() {
   const wallets = JSON.parse(fs.readFileSync(path.join(A, 'wallets_full.json'), 'utf8')).map(String);
-  const pilotSet = new Set(JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8')).map((x) => x.addr.toLowerCase()));
-  const rest = wallets.filter((w) => !pilotSet.has(w.toLowerCase()));
+  const pilotPlan = JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8')).map((x) => x.addr);
+  const pilotSet = new Set(pilotPlan.map((x) => x.toLowerCase()));
+  let rest; let seed;
+  if (LAP2) {
+    // LAP 2: shuffle SEMUA 1000 wallet (wallets_full udah termasuk 36 pilot) — grup + peran beda dari lap 1
+    rest = [...wallets];
+    seed = 777;
+    for (let j = rest.length - 1; j > 0; j--) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const k = seed % (j + 1);
+      const t = rest[j]; rest[j] = rest[k]; rest[k] = t;
+    }
+  } else {
+    rest = wallets.filter((w) => !pilotSet.has(w.toLowerCase()));
+    seed = 42;
+  }
   const wins = [];
-  let i = 0; let seed = 42;
+  let i = 0;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   while (i < rest.length) { const size = Math.min(rest.length - i, 27 + Math.floor(rnd() * 4)); wins.push(rest.slice(i, i + size)); i += size; }
   return wins;
@@ -68,7 +97,7 @@ const spawnDetached = (args, logFile) => {
 
 (async () => {
   const wins = buildWindows();
-  if (DRY) { say(`DRY: ${wins.length} window | ${wins.map((w) => w.length).join(',')} | total ${wins.reduce((a, w) => a + w.length, 0)} + pilot 36`); return; }
+  if (DRY) { say(`DRY${LAP2 ? ' LAP2' : ''}: ${wins.length} window | ${wins.map((w) => w.length).join(',')} | total ${wins.reduce((a, w) => a + w.length, 0)}`); return; }
   if (!RUN) { say('butuh --run'); return; }
   const st = loadLine();
   // migrasi nama fase v2 → v3 (seeded→aged, burst→trigger) + restart-safe (seeding/stuck diulang)
@@ -78,7 +107,7 @@ const spawnDetached = (args, logFile) => {
 
   // === FASE 0: tunggu pilot LIFTED + auto-resume pilot kalau mati ===
   if (st.status === 'waiting-pilot') {
-    say(`JALUR v3 start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
+    say(`JALUR v3${LAP2 ? ' LAP2' : ''} start: ${wins.length} window + pilot. Nunggu pilot lift dulu...`);
     for (;;) {
       if (fs.existsSync(path.join(A, 'STOP'))) { st.status = 'stopped'; saveLine(st); say('STOP — keluar.'); return; }
       const ps = readJson(PILOT_STATE);
@@ -150,7 +179,7 @@ const spawnDetached = (args, logFile) => {
     if (!seeding && queue < MAX_QUEUE && st.nextWindow < wins.length) {
       const wi = st.nextWindow;
       const chunk = wins[wi];
-      const mN = wi + 2;
+      const mN = wi + 2 + (LAP2 ? 34 : 0);
       const creator = chunk[0];
       const backers = chunk.slice(1);
       const aCount = Math.min(MAXA, Math.max(1, backers.length - 1));
@@ -159,7 +188,7 @@ const spawnDetached = (args, logFile) => {
       const skipped = backers.slice(aCount, backers.length - 1);
       const gap = Math.max(0.001, LIFT_NET - aCount * A_BUY * 0.99);
       const trigWant = gap * 1.12 / 0.99 + 0.0015;
-      const [name, ticker] = NAMES[wi % NAMES.length];
+      const [name, ticker] = NAMESEL[wi % NAMESEL.length];
       const planFile = `analysis/line_m${mN}_plan.json`;
       const fundFile = `analysis/line_m${mN}_fund.json`;
       const stateFile = `analysis/factory_m${mN}_state.json`;
@@ -222,7 +251,7 @@ const spawnDetached = (args, logFile) => {
     if (st.nextWindow >= wins.length && !active) {
       st.status = 'done'; saveLine(st);
       const pts = st.missions.reduce((a, m) => a + (Number(m.points) || 0), 0);
-      say(`=== JALUR v3 SELESAI: ${st.missions.length} mission (+pilot) | poin ≈ ${pts} ===`);
+      say(`=== JALUR v3${LAP2 ? ' LAP2' : ''} SELESAI: ${st.missions.length} mission | poin ≈ ${pts} ===`);
       return;
     }
     // -- deteksi macet --
