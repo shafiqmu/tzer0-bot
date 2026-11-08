@@ -16,10 +16,10 @@ const lp = new ethers.Contract('0xbce48917C41BB45Ad15f859E4Bf0e4EEa74bAd5c', ['f
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
 const say = (...x) => console.log(`[fix68 ${new Date().toISOString()}]`, ...x);
 
-const hasProc = (needle) => {
+const hasProc = (...needles) => {
   for (const pid of fs.readdirSync('/proc')) {
     if (!/^\d+$/.test(pid)) continue;
-    try { if (fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(needle)) return true; } catch (e) {}
+    try { const cm = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'); if (needles.every((n) => cm.includes(n))) return true; } catch (e) {}
   }
   return false;
 };
@@ -29,6 +29,14 @@ const backers = plan0.filter((x) => x.role === 'backer').map((x) => x.addr);
 const trig = backers[backers.length - 1];
 
 function spawnSeed() {
+  // matiin dulu crash-loop trigger-child #68 (biar gak rebutan state; child kita yg --phase seed gak kesentuh)
+  for (const pid of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      const cm = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+      if (cm.includes('--phase trigger') && cm.includes('line_m68_plan')) { process.kill(Number(pid), 'SIGTERM'); say(`kill trigger-child ${pid}`); }
+    } catch (e) {}
+  }
   fs.writeFileSync(path.join(A, 'HOLD'), '');
   const st = readJson(stF);
   if (st.step !== 'phaseA') { st.step = 'phaseA'; fs.writeFileSync(stF, JSON.stringify(st, null, 1)); say('step → phaseA'); }
@@ -53,19 +61,18 @@ function spawnSeed() {
     if (ageMin >= 115) { say('hard-cap — funding apa adanya.'); break; }
 
     if (nBuy < 27 && ageMin < 62) {
-      if (!hasProc('factory_m68_state')) {
+      if (hasProc('--phase seed', 'line_m68_plan')) { say('seed-child kita masih jalan — biarin.'); }
+      else if (Date.now() - lastSeedSpawn > 3 * 60000) {
         if (Date.now() - lastRefill > 20 * 60 * 1000) {
           lastRefill = Date.now();
           say('wallet bolong — coba isi ulang (consolidate, idempotent)...');
           const r = spawnSync('node', ['scripts/consolidate.js', '--plan', 'analysis/fix68_plan.json', '--run', '--exclude', 'analysis/fix68_excl.txt'], { cwd: ROOT, encoding: 'utf8', timeout: 900000 });
           process.stdout.write((r.stdout || '').split('\n').slice(-4).join('\n') + '\n');
         }
+        lastSeedSpawn = Date.now();
         say(nBuy === 0 ? 'belum ada beli — spawn seed-child awal.' : 'lanjut beli sisa — respawn seed-child.');
-        if (Date.now() - lastSeedSpawn > 10 * 60000) { lastSeedSpawn = Date.now(); spawnSeed(); }
-        else say('seed-child baru aja jalan — cooldown 10 mnt.');
-      } else {
-        say('seed-child masih jalan — biarin.');
-      }
+        spawnSeed();
+      } else say('cooldown seed 3 mnt.');
     }
     await sleep(60000);
   }
