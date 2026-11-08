@@ -40,6 +40,8 @@ const backers = plan0.filter((x) => x.role === 'backer').map((x) => x.addr);
 const trig = backers[backers.length - 1];
 
 function exclSet() {
+  // pelindung donor: spares + wallet 5 redo (dari fixl3_sweep_excl.txt — mission yg udah kelar BOLEH disedot)
+  try { return new Set(fs.readFileSync(path.join(A, 'fixl3_sweep_excl.txt'), 'utf8').split('\n').filter(Boolean)); } catch (e) {}
   const ex = new Set();
   try { readJson(path.join(A, 'factory_plan.json')).filter((x) => x.role === 'spare').forEach((x) => ex.add(x.addr.toLowerCase())); } catch (e) {}
   for (const m of s3.missions || []) if (['aged', 'trigger', 'seeding'].includes(m.phase)) for (const w of m.wallets) ex.add(w.toLowerCase());
