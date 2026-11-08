@@ -140,7 +140,7 @@ const spawnDetached = (args, logFile) => {
           m.triggerAddr = ms.triggerAddr; m.triggerTs = ms.triggerTs; m.settledTs = Date.now();
           saveLine(st);
           say(`MISSION #${m.n} (${m.name}) SELESAI ✅ poin ≈ ${ms.totalPoints}`);
-        } else if (Date.now() - (m.triggerTs || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_stat[e]`)) {
+        } else if (Date.now() - Math.max(m.triggerTs || 0, (ms && ms.triggerTs) || 0) > 5 * 60000 && !hasProc(`factory_m${m.n}_stat[e]`)) {
           say(`⚠️ #${m.n} pemicu mati di step ${ms ? ms.step : '?'} — resume...`);
           spawnDetached(['scripts/factory-mission.js', '--run', '--phase', 'trigger', '--plan', m.planFile, '--state', m.stateFile, '--log', m.logFile, '--name', m.name, '--ticker', m.ticker], m.logFile);
         }
