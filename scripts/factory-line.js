@@ -22,7 +22,7 @@ const DRY = argv.includes('--dry');
 const LAP = argv.includes('--lap4') ? 4 : argv.includes('--lap3') ? 3 : argv.includes('--lap2') ? 2 : 1; // puteran: shuffle+nama beda tiap lap, mN lanjut
 const LAP2 = LAP === 2; // mode lap-2 (dipertahankan buat kompat)
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
-const A_BUY = 0.0102;        // beli Fase A (≥0.01)
+const A_BUY = 0.0114;        // beli Fase A (≥0.01; 0.0114 → fill ~97% biar gak disamber bot completer)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
 const MAX_QUEUE = LAP >= 3 ? 5 : 6; // maks mission "aged" nunggu bareng (lap 3+: 5 — kas ketat, antrian lama harus kelar dulu)

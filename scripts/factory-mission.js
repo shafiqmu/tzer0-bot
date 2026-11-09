@@ -31,7 +31,7 @@ const LOG_FILE = resolveP(arg('--log', 'logs/factory-1.log'));
 const NAME = arg('--name', 'Nimbus Foundry');
 const TICKER = arg('--ticker', 'NBFO');
 const PHASE = arg('--phase', 'full'); // seed | trigger | full
-const A_BUY = Number(arg('--buyeth', '0.0102')); // ukuran beli Fase A (≥0.01 wajibnya)
+const A_BUY = Number(arg('--buyeth', '0.0114')); // ukuran beli Fase A (≥0.01 wajibnya). 0.0114: 25 beli → fill ~97% kurva (gap <0.01) biar gak disamber bot completer
 const MAXA = 27; // maks wallet fase A (27 × 0.0102 = 0.2754 gross ≈ 96% kurva)
 const LIFT_NET = 0.28335; // ETH NET buat liftoff (kalibrasi on-chain dari kurva)
 const HOLD_MS = 61 * 60000;
