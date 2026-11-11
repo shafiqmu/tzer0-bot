@@ -19,14 +19,14 @@ const A = path.join(ROOT, 'analysis');
 const argv = process.argv.slice(2);
 const RUN = argv.includes('--run');
 const DRY = argv.includes('--dry');
-const LAP = argv.includes('--lap4') ? 4 : argv.includes('--lap3') ? 3 : argv.includes('--lap2') ? 2 : 1; // puteran: shuffle+nama beda tiap lap, mN lanjut
+const LAP = (() => { const m = argv.find((a) => /^--lap\d+$/.test(a)); return m ? Number(m.slice(5)) : 1; })(); // puteran: shuffle+nama beda tiap lap, mN lanjut (generic: --lap2..--lap99)
 const LAP2 = LAP === 2; // mode lap-2 (dipertahankan buat kompat)
 const RPC = process.env.RPC_URL || 'https://base-sepolia-rpc.publicnode.com';
 const A_BUY = 0.0114;        // beli Fase A (≥0.01; 0.0114 → fill ~97% biar gak disamber bot completer)
 const MAXA = 27;             // maks wallet fase A
 const LIFT_NET = 0.28335;    // kebutuhan liftoff (net, ETH)
-const MAX_QUEUE = LAP >= 3 ? 5 : 6; // maks mission "aged" nunggu bareng (lap 3+: 5 — kas ketat, antrian lama harus kelar dulu)
-const MAX_TRIG = 5;          // TURBO: pemicu paralel ×5 (wallet beda — aman; 3→5 biar antrian gak nyumbat)
+const MAX_QUEUE = Number(process.env.TZ_MAXQ || (LAP >= 8 ? 20 : LAP >= 6 ? 16 : LAP >= 5 ? 12 : LAP >= 3 ? 5 : 6)); // AUTO-RAMP: lap5=12, lap6-7=16, lap8+=20 (aged=0 RAM)
+const MAX_TRIG = Number(process.env.TZ_TRIG || (LAP >= 5 ? 6 : 5)); // pemicu paralel — lap5+: 6
 const AGE_MS = 61 * 60000;   // umur minimum fase A sebelum pemicu
 const NAMES = [
   ['Cinder Relay', 'CNDR'], ['Harbor Nine', 'HRB9'], ['Vela Works', 'VELA'], ['Kite & Ember', 'KITE'],
@@ -57,6 +57,17 @@ const FIRSTS = [...new Set(NAMES2.map((n) => n[0].split(' ')[0]))];
 const SECONDS = [...new Set(NAMES2.map((n) => n[0].split(' ').slice(-1)[0]))];
 const genName = (wi, lap) => { const f = FIRSTS[(wi + lap * 7) % FIRSTS.length]; const s = SECONDS[(wi * 5 + lap * 11) % SECONDS.length]; return [f + ' ' + s, (f.slice(0, 2) + s.slice(0, 2)).toUpperCase()]; };
 const LINE_STATE = path.join(A, LAP > 1 ? `line_state${LAP}.json` : 'line_state.json');
+// offset mN: lap 1-4 tetap; lap 5+ dihitung dari state lap sebelumnya (max n + 1) supaya nomor lanjut tanpa tabrakan
+const OFFSET = (() => {
+  const FIX = { 1: 2, 2: 36, 3: 71, 4: 107 };
+  if (FIX[LAP]) return FIX[LAP];
+  try {
+    const prev = JSON.parse(fs.readFileSync(path.join(A, `line_state${LAP - 1}.json`), 'utf8'));
+    let mx = 0; for (const m of prev.missions || []) if (m.n > mx) mx = m.n;
+    if (mx > 0) return mx + 1;
+  } catch (e) {}
+  return 143 + (LAP - 5) * 36;
+})();
 const PILOT_STATE = path.join(A, 'factory_state.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -93,6 +104,13 @@ function buildWindows() {
   let i = 0;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   while (i < rest.length) { const size = Math.min(rest.length - i, 27 + Math.floor(rnd() * 4)); wins.push(rest.slice(i, i + size)); i += size; }
+  // rebalance ekor: window terakhir kerupuk (<10 wallet) digabung & dibagi rata sama window sebelumnya —
+  // biar gak ada mission mini (creator+trigger doang) yang gak bisa lift
+  if (wins.length > 1 && wins[wins.length - 1].length < 10) {
+    const all = [...wins[wins.length - 2], ...wins[wins.length - 1]];
+    const half = Math.ceil(all.length / 2);
+    wins.splice(wins.length - 2, 2, all.slice(0, half), all.slice(half));
+  }
   return wins;
 }
 const SPARES = (() => { try { return JSON.parse(fs.readFileSync(path.join(A, 'factory_plan.json'), 'utf8')).filter((p) => p.role === 'spare').map((p) => p.addr); } catch (e) { return []; } })();
@@ -186,7 +204,7 @@ const spawnDetached = (args, logFile) => {
     if (!seeding && queue < MAX_QUEUE && st.nextWindow < wins.length) {
       const wi = st.nextWindow;
       const chunk = wins[wi];
-      const mN = wi + { 1: 2, 2: 36, 3: 71, 4: 107 }[LAP];
+      const mN = wi + OFFSET;
       const creator = chunk[0];
       const backers = chunk.slice(1);
       const aCount = Math.min(MAXA, Math.max(1, backers.length - 1));

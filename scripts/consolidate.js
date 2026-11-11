@@ -59,7 +59,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const addrs = [...byAddr.keys()].filter((a) => !excl.has(a));
   const donors = [];
   let have = 0n;
-  const MIN_MOVE = ethers.parseEther('0.0002');
+  const MIN_MOVE = ethers.parseEther('0.00001');
   for (let i = 0; i < addrs.length && have < totalNeed; i += 15) {
     const chunk = addrs.slice(i, i + 15);
     const rs = await Promise.all(chunk.map(getBal));

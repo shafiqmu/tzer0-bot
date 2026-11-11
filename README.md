@@ -2,6 +2,10 @@
 
 On-chain automation for Base Sepolia TZer0 testnet.
 
+> 📌 **Farming Ops — baca [`docs/OPS-NOTES.md`](docs/OPS-NOTES.md) dulu** sebelum ngoprek.
+> Isinya: arsitektur mesin (factory-line/mission/consolidate/mini-lap), aturan poin,
+> pitfalls mahal (funding mentok, exclude basi, sweep), resep wind-down, dan status akhir operasi.
+
 ## Termux Setup
 
 ```bash
