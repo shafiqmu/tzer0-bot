@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // yang gak boleh diambil duitnya (wallet yg bakal beli / sedang aktif)
   const excl = new Set();
   if (EXCLUDE_FILE) { try { for (const l of fs.readFileSync(path.join(ROOT, EXCLUDE_FILE), 'utf8').split(/\r?\n/)) { const a = l.trim().toLowerCase(); if (/^0x[0-9a-f]{40}$/.test(a)) excl.add(a); } } catch (e) {} }
-  for (const a of targets.keys()) excl.add(a);
+  // NOTE: target TIDAK auto-exclude — target boleh jadi donor utk KELEBIHAN di atas want-nya (lihat keep di scan donor)
 
   console.log(`target: ${targets.size} | exclude: ${excl.size}`);
 
@@ -63,7 +63,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   for (let i = 0; i < addrs.length && have < totalNeed; i += 15) {
     const chunk = addrs.slice(i, i + 15);
     const rs = await Promise.all(chunk.map(getBal));
-    rs.forEach((b, j) => { const a = chunk[j]; bal.set(a, b); const mv = (b || 0n) - RESERVE; if (mv > MIN_MOVE) { donors.push({ addr: a, movable: mv }); have += mv; } });
+    rs.forEach((b, j) => { const a = chunk[j]; bal.set(a, b); const t = targets.get(a); const keep = t && t.want > RESERVE ? t.want : RESERVE; const mv = (b || 0n) - keep; if (mv > MIN_MOVE) { donors.push({ addr: a, movable: mv }); have += mv; } });
   }
   console.log(`donor terkumpul: ${donors.length} wallet ≈ ${ethers.formatEther(have)} ETH${have < totalNeed ? ' ⚠️ KURANG' : ' ✅'}`);
 
